@@ -1,0 +1,903 @@
+// internal/tui/app.go
+//
+// This is the main TUI (Terminal User Interface) for Lattice.
+// It uses bubbletea, which follows The Elm Architecture:
+//
+// 1. Model: Your application state
+// 2. Update: A function that updates state based on messages
+// 3. View: A function that renders state to a string
+//
+// The flow is: User Input -> Message -> Update -> New Model -> View -> Screen
+
+package tui
+
+import (
+	"errors"
+	"fmt"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/yourusername/lattice/internal/config"
+	"github.com/yourusername/lattice/internal/logbook"
+	"github.com/yourusername/lattice/internal/modes"
+	"github.com/yourusername/lattice/internal/modes/agent_release"
+	"github.com/yourusername/lattice/internal/modes/hiring"
+	"github.com/yourusername/lattice/internal/modes/orchestrator_release"
+	"github.com/yourusername/lattice/internal/modes/orchestrator_selection"
+	"github.com/yourusername/lattice/internal/modes/planning"
+	"github.com/yourusername/lattice/internal/modes/refinement"
+	"github.com/yourusername/lattice/internal/modes/work_cleanup"
+	"github.com/yourusername/lattice/internal/modes/work_process"
+	"github.com/yourusername/lattice/internal/orchestrator"
+	"github.com/yourusername/lattice/internal/workflow"
+)
+
+// appState represents which "screen" we're on
+type appState int
+
+const (
+	stateMainMenu       appState = iota // Main menu with "Commission Work", etc.
+	stateCommissionWork                 // Running a commission workflow mode
+	stateViewAgents                     // Viewing available agents (legacy)
+)
+
+const (
+	boardRefreshInterval = 3 * time.Second
+	statusWindowName     = "status"
+	statusReturnHotkey   = "M-s"
+)
+
+var phaseOrder = []workflow.Phase{
+	workflow.PhasePlanning,
+	workflow.PhaseOrchestratorSelection,
+	workflow.PhaseHiring,
+	workflow.PhaseWorkProcess,
+	workflow.PhaseRefinement,
+	workflow.PhaseAgentRelease,
+	workflow.PhaseWorkCleanup,
+	workflow.PhaseOrchestratorRelease,
+}
+
+type boardFocus int
+
+const (
+	focusMenu boardFocus = iota
+	focusSessions
+)
+
+type statusRefreshMsg struct {
+	sessions []sessionItem
+	cycle    orchestrator.CycleStatus
+	hasCycle bool
+	phase    workflow.Phase
+	err      error
+}
+
+type sessionItem struct {
+	Agent        string
+	Worktree     string
+	Number       int
+	Points       int
+	Beads        int
+	Cycle        int
+	Phase        string
+	State        string
+	Questions    int
+	Waiting      int
+	Window       string
+	WindowActive bool
+	LastUpdated  time.Time
+}
+
+type tmuxWindowInfo struct {
+	Name   string
+	Active bool
+}
+
+// App is the main application model. In bubbletea, this holds ALL your state.
+type App struct {
+	state        appState
+	config       *config.Config
+	orchestrator *orchestrator.Orchestrator
+	workflow     *workflow.Workflow
+	logbook      *logbook.Logbook
+
+	// Active mode when in stateCommissionWork
+	activeMode modes.Mode
+	modeCtx    *modes.ModeContext
+
+	// UI components
+	mainMenu      list.Model // The main menu list
+	statusMsg     string     // Status message to display
+	err           error      // Any error to display
+	lastLogStatus string
+
+	// Window size (we get this from bubbletea)
+	width  int
+	height int
+
+	// Status board data
+	boardFocus       boardFocus
+	sessionItems     []sessionItem
+	sessionSelection int
+	boardErr         string
+	cycleStatus      orchestrator.CycleStatus
+	hasCycleStatus   bool
+	cachedPhase      workflow.Phase
+	tmuxSession      string
+	statusWindowName string
+	statusReturnKey  string
+}
+
+// menuItem implements list.Item interface for our menu items
+type menuItem struct {
+	title string
+	desc  string
+}
+
+func (i menuItem) Title() string       { return i.title }
+func (i menuItem) Description() string { return i.desc }
+func (i menuItem) FilterValue() string { return i.title }
+
+// NewApp creates a new App instance
+func NewApp(projectDir string) *App {
+	cfg := config.NewConfig(projectDir)
+	wf := workflow.New(cfg.LatticeProjectDir)
+	orch := orchestrator.New(cfg)
+	logPath := filepath.Join(cfg.LatticeProjectDir, "logs", "journey.log")
+	lb, err := logbook.New(logPath)
+	if err == nil {
+		lb.Info("Session opened · workflow phase: %s", wf.CurrentPhase().FriendlyName())
+	}
+
+	// Build menu items based on workflow state
+	menuItems := buildMainMenu(wf)
+
+	// Create the list component
+	mainMenu := list.New(menuItems, list.NewDefaultDelegate(), 0, 0)
+	mainMenu.Title = "⬡ THE TERMINAL"
+	mainMenu.SetShowStatusBar(false)
+	mainMenu.SetFilteringEnabled(false)
+
+	app := &App{
+		state:            stateMainMenu,
+		config:           cfg,
+		orchestrator:     orch,
+		workflow:         wf,
+		logbook:          lb,
+		mainMenu:         mainMenu,
+		boardFocus:       focusMenu,
+		statusWindowName: statusWindowName,
+		statusReturnKey:  statusReturnHotkey,
+		modeCtx: &modes.ModeContext{
+			Config:       cfg,
+			Workflow:     wf,
+			Orchestrator: orch,
+			Logbook:      lb,
+		},
+	}
+	if session, windowIdx, err := detectTmuxContext(); err == nil {
+		app.tmuxSession = session
+		if err := ensureStatusWindow(session, windowIdx, statusWindowName); err == nil {
+			_ = bindStatusReturnKey(session, statusWindowName, statusReturnHotkey)
+		}
+	}
+	return app
+}
+
+// buildMainMenu creates the main menu items based on workflow state
+func buildMainMenu(wf *workflow.Workflow) []list.Item {
+	phase := wf.CurrentPhase()
+	items := []list.Item{}
+
+	// Show "Resume Work" if there's an active workflow
+	if phase.IsResumable() {
+		items = append(items, menuItem{
+			title: fmt.Sprintf("Resume Work (%s)", phase.FriendlyName()),
+			desc:  "Continue from where you left off",
+		})
+	}
+
+	// Always show Commission Work option
+	if phase == workflow.PhaseNone || phase == workflow.PhaseComplete {
+		items = append(items, menuItem{
+			title: "Commission Work",
+			desc:  "Start a new orchestration task",
+		})
+	}
+
+	items = append(items,
+		menuItem{title: "View Agents", desc: "Browse available agents"},
+		menuItem{title: "Settings", desc: "Configure Lattice"},
+		menuItem{title: "Exit", desc: "Quit Lattice"},
+	)
+
+	return items
+}
+
+func (a *App) logInfo(format string, args ...any) {
+	if a.logbook == nil {
+		return
+	}
+	a.logbook.Info(format, args...)
+}
+
+func (a *App) logWarn(format string, args ...any) {
+	if a.logbook == nil {
+		return
+	}
+	a.logbook.Warn(format, args...)
+}
+
+func (a *App) logError(format string, args ...any) {
+	if a.logbook == nil {
+		return
+	}
+	a.logbook.Error(format, args...)
+}
+
+func (a *App) logProgress(status string) {
+	status = strings.TrimSpace(status)
+	if status == "" || status == a.lastLogStatus {
+		return
+	}
+	a.lastLogStatus = status
+	a.logInfo(status)
+}
+
+// Init is called once when the program starts.
+func (a *App) Init() tea.Cmd {
+	return a.fetchStatusSnapshot()
+}
+
+// Update is called when a message is received.
+func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		a.width = msg.Width
+		a.height = msg.Height
+		a.mainMenu.SetSize(max(0, msg.Width-6), max(0, msg.Height-10))
+		if a.state == stateCommissionWork && a.activeMode != nil {
+			newMode, cmd := a.activeMode.Update(msg)
+			a.activeMode = newMode
+			return a, cmd
+		}
+		return a, nil
+
+	case statusRefreshMsg:
+		if msg.err != nil {
+			a.boardErr = msg.err.Error()
+		} else {
+			a.boardErr = ""
+			a.sessionItems = msg.sessions
+			if len(a.sessionItems) == 0 {
+				a.sessionSelection = 0
+			} else if a.sessionSelection >= len(a.sessionItems) {
+				a.sessionSelection = len(a.sessionItems) - 1
+			}
+			a.cycleStatus = msg.cycle
+			a.hasCycleStatus = msg.hasCycle
+			a.cachedPhase = msg.phase
+		}
+		return a, a.scheduleStatusRefresh()
+
+	case tea.KeyMsg:
+		key := msg.String()
+		switch key {
+		case "ctrl+c":
+			return a, tea.Quit
+		case "q":
+			if a.state == stateMainMenu {
+				return a, tea.Quit
+			}
+		case "esc":
+			if a.state != stateMainMenu {
+				return a.returnToMainMenu()
+			}
+		case "r":
+			a.statusMsg = "Refreshing status board..."
+			return a, a.fetchStatusSnapshot()
+		case "tab":
+			if a.boardFocus == focusMenu && len(a.sessionItems) > 0 {
+				a.boardFocus = focusSessions
+			} else {
+				a.boardFocus = focusMenu
+			}
+		case "right", "l":
+			if len(a.sessionItems) > 0 {
+				a.boardFocus = focusSessions
+			}
+		case "left", "h":
+			a.boardFocus = focusMenu
+		case "up", "k":
+			if a.boardFocus == focusSessions && len(a.sessionItems) > 0 {
+				if a.sessionSelection > 0 {
+					a.sessionSelection--
+				}
+				return a, nil
+			}
+		case "down", "j":
+			if a.boardFocus == focusSessions && len(a.sessionItems) > 0 {
+				if a.sessionSelection < len(a.sessionItems)-1 {
+					a.sessionSelection++
+				}
+				return a, nil
+			}
+		case "enter":
+			if a.boardFocus == focusSessions {
+				if cmd := a.openSelectedSessionWindow(); cmd != nil {
+					return a, cmd
+				}
+				return a, nil
+			}
+			if a.state == stateMainMenu {
+				return a.handleMainMenuSelection()
+			}
+		}
+
+	case modes.ModeCompleteMsg:
+		if msg.Error != nil {
+			a.statusMsg = fmt.Sprintf("Error: %v", msg.Error)
+			a.logError("Mode completed with error: %v", msg.Error)
+			return a.returnToMainMenu()
+		}
+		if a.activeMode != nil {
+			a.logInfo("%s complete · advancing to %s", a.activeMode.Name(), msg.NextPhase.FriendlyName())
+		} else {
+			a.logInfo("Advancing to %s", msg.NextPhase.FriendlyName())
+		}
+		return a.advanceToPhase(msg.NextPhase)
+
+	case modes.ModeErrorMsg:
+		a.statusMsg = fmt.Sprintf("Error: %v", msg.Error)
+		a.logError("Mode error: %v", msg.Error)
+		return a.returnToMainMenu()
+
+	case modes.ModeProgressMsg:
+		a.statusMsg = msg.Status
+		a.logProgress(msg.Status)
+		return a, nil
+	}
+
+	var cmds []tea.Cmd
+	switch a.state {
+	case stateMainMenu:
+		if a.boardFocus == focusMenu {
+			var menuCmd tea.Cmd
+			a.mainMenu, menuCmd = a.mainMenu.Update(msg)
+			if menuCmd != nil {
+				cmds = append(cmds, menuCmd)
+			}
+		}
+	case stateCommissionWork:
+		if a.activeMode != nil {
+			newMode, modeCmd := a.activeMode.Update(msg)
+			a.activeMode = newMode
+			if modeCmd != nil {
+				cmds = append(cmds, modeCmd)
+			}
+		}
+	}
+
+	return a, tea.Batch(cmds...)
+}
+
+// handleMainMenuSelection processes menu item selection
+func (a *App) handleMainMenuSelection() (tea.Model, tea.Cmd) {
+	item, ok := a.mainMenu.SelectedItem().(menuItem)
+	if !ok {
+		return a, nil
+	}
+
+	switch {
+	case item.title == "Commission Work":
+		a.logInfo("Menu · Commission Work selected")
+		// Start new commission from planning phase
+		return a.startCommissionWork(workflow.PhasePlanning)
+
+	case strings.HasPrefix(item.title, "Resume Work"):
+		a.logInfo("Menu · Resume Work selected (%s)", a.workflow.CurrentPhase().FriendlyName())
+		// Resume from detected phase
+		phase := a.workflow.CurrentPhase()
+		return a.startCommissionWork(phase)
+
+	case item.title == "View Agents":
+		a.logInfo("Menu · View Agents selected")
+		a.statusMsg = "Not implemented yet"
+		return a, nil
+
+	case item.title == "Settings":
+		a.logInfo("Menu · Settings selected")
+		a.statusMsg = "Not implemented yet"
+		return a, nil
+
+	case item.title == "Exit":
+		a.logInfo("Menu · Exit selected")
+		return a, tea.Quit
+	}
+
+	return a, nil
+}
+
+// startCommissionWork begins or resumes the commission workflow
+func (a *App) startCommissionWork(fromPhase workflow.Phase) (tea.Model, tea.Cmd) {
+	a.state = stateCommissionWork
+
+	// Create the mode for the given phase
+	mode := a.createModeForPhase(fromPhase)
+	if mode == nil {
+		a.statusMsg = fmt.Sprintf("Unknown phase: %s", fromPhase)
+		a.logWarn("Attempted to start unknown phase: %s", fromPhase)
+		return a.returnToMainMenu()
+	}
+
+	a.activeMode = mode
+	a.statusMsg = fmt.Sprintf("Starting %s...", mode.Name())
+	a.logInfo("Starting %s", mode.Name())
+
+	// Initialize the mode
+	cmd := mode.Init(a.modeCtx)
+	return a, cmd
+}
+
+// advanceToPhase moves to the next workflow phase
+func (a *App) advanceToPhase(phase workflow.Phase) (tea.Model, tea.Cmd) {
+	// Check if workflow is complete
+	if phase == workflow.PhaseComplete {
+		a.statusMsg = "Commission complete!"
+		return a.returnToMainMenu()
+	}
+
+	// Create and initialize the next mode
+	mode := a.createModeForPhase(phase)
+	if mode == nil {
+		a.statusMsg = fmt.Sprintf("Unknown phase: %s", phase)
+		a.logWarn("Cannot advance, unknown phase: %s", phase)
+		return a.returnToMainMenu()
+	}
+
+	a.activeMode = mode
+	a.statusMsg = fmt.Sprintf("Advancing to %s...", mode.Name())
+	a.logInfo("Advancing to %s", mode.Name())
+
+	cmd := mode.Init(a.modeCtx)
+	return a, cmd
+}
+
+// createModeForPhase creates the appropriate mode for a workflow phase
+func (a *App) createModeForPhase(phase workflow.Phase) modes.Mode {
+	switch phase {
+	case workflow.PhasePlanning:
+		return planning.New()
+	case workflow.PhaseOrchestratorSelection:
+		return orchestrator_selection.New()
+	case workflow.PhaseHiring:
+		return hiring.New()
+	case workflow.PhaseWorkProcess:
+		return work_process.New()
+	case workflow.PhaseRefinement:
+		return refinement.New()
+	case workflow.PhaseAgentRelease:
+		return agent_release.New()
+	case workflow.PhaseWorkCleanup:
+		return work_cleanup.New()
+	case workflow.PhaseOrchestratorRelease:
+		return orchestrator_release.New()
+	default:
+		return nil
+	}
+}
+
+// returnToMainMenu transitions back to the main menu
+func (a *App) returnToMainMenu() (tea.Model, tea.Cmd) {
+	a.state = stateMainMenu
+	a.activeMode = nil
+	a.logInfo("Returned to main menu (phase: %s)", a.workflow.CurrentPhase().FriendlyName())
+
+	// Refresh menu items (workflow state may have changed)
+	a.mainMenu.SetItems(buildMainMenu(a.workflow))
+
+	return a, nil
+}
+
+// View renders the current state to a string.
+func (a *App) View() string {
+	width := a.width
+	if width <= 0 {
+		width = 100
+	}
+	rightWidth := max(32, width/3)
+	leftWidth := width - rightWidth - 4
+	if leftWidth < 40 {
+		leftWidth = width - 4
+	}
+	if leftWidth < 20 {
+		leftWidth = width
+		rightWidth = 0
+	}
+	if a.state == stateMainMenu && a.boardFocus == focusMenu {
+		a.mainMenu.SetSize(max(20, leftWidth-4), max(10, a.height-10))
+	}
+	var content string
+	switch a.state {
+	case stateMainMenu:
+		content = a.mainMenu.View()
+	case stateCommissionWork:
+		if a.activeMode != nil {
+			content = a.activeMode.View()
+		} else {
+			content = "Loading sessions..."
+		}
+	case stateViewAgents:
+		content = "Agent viewer not implemented"
+	}
+	return a.renderStatusBoard(content, leftWidth, rightWidth)
+}
+
+func (a *App) renderLogPanel() string {
+	if a.logbook == nil {
+		return ""
+	}
+	lines := a.logbook.Tail(8)
+	if len(lines) == 0 {
+		return ""
+	}
+	fileName := filepath.Base(a.logbook.Path())
+	if fileName == "." || fileName == "" {
+		fileName = "log"
+	}
+	head := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#5B8DEF")).
+		Render(fmt.Sprintf("LOG · %s", fileName))
+	body := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#AAAAAA")).
+		Render(strings.Join(lines, "\n"))
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Padding(0, 1).
+		Render(fmt.Sprintf("%s\n%s", head, body))
+	return box
+}
+
+func (a *App) renderStatusBoard(mainContent string, leftWidth, rightWidth int) string {
+	header := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FF6B6B")).
+		MarginBottom(1).
+		Render("⬡ LATTICE")
+	left := lipgloss.JoinVertical(lipgloss.Left,
+		a.renderPhasePanel(leftWidth-4),
+		"",
+		a.renderMainArea(mainContent, leftWidth-4),
+	)
+	leftBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Padding(0, 1).
+		Width(max(20, leftWidth)).
+		Render(left)
+	var body string
+	if rightWidth > 0 {
+		right := a.renderSessionsPanel(rightWidth - 4)
+		rightBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#444444")).
+			Padding(0, 1).
+			Width(max(20, rightWidth)).
+			Render(right)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
+	} else {
+		body = leftBox
+	}
+	sections := []string{header, body}
+	if logPanel := a.renderLogPanel(); logPanel != "" {
+		sections = append(sections, logPanel)
+	}
+	footer := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		MarginTop(1).
+		Render(a.statusMsg)
+	sections = append(sections, footer)
+	return strings.Join(sections, "\n")
+}
+
+func (a *App) renderPhasePanel(width int) string {
+	phase := a.cachedPhase
+	if phase == 0 {
+		phase = a.workflow.CurrentPhase()
+	}
+	pos, total := phasePosition(phase)
+	phaseLine := fmt.Sprintf("%s (%d/%d)", phase.FriendlyName(), pos+1, total)
+	nextPhases := upcomingPhases(phase)
+	nextLine := ""
+	if len(nextPhases) > 0 {
+		var names []string
+		for _, p := range nextPhases {
+			names = append(names, p.FriendlyName())
+		}
+		nextLine = fmt.Sprintf("Next: %s", strings.Join(names, " → "))
+	}
+	cycleLine := "Cycle: none scheduled"
+	if a.hasCycleStatus {
+		cycleLine = fmt.Sprintf(
+			"Cycle %d · %s · %d session(s)",
+			a.cycleStatus.Cycle,
+			strings.TrimSpace(a.cycleStatus.Status),
+			a.cycleStatus.SessionCount,
+		)
+	}
+	lines := []string{
+		fmt.Sprintf("Phase: %s", phaseLine),
+	}
+	if nextLine != "" {
+		lines = append(lines, nextLine)
+	}
+	lines = append(lines, cycleLine)
+	if a.boardErr != "" {
+		lines = append(lines, fmt.Sprintf("⚠ %s", a.boardErr))
+	}
+	return lipgloss.NewStyle().Width(max(20, width)).Render(strings.Join(lines, "\n"))
+}
+
+func (a *App) renderMainArea(content string, width int) string {
+	if strings.TrimSpace(content) == "" {
+		content = "Ready to commission work."
+	}
+	return lipgloss.NewStyle().Width(max(20, width)).Render(content)
+}
+
+func (a *App) renderSessionsPanel(width int) string {
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#5B8DEF")).
+		Render(fmt.Sprintf("Sessions (%d)", len(a.sessionItems)))
+	if len(a.sessionItems) == 0 {
+		note := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("No active worktrees. Commission work to launch agents.")
+		return lipgloss.JoinVertical(lipgloss.Left, title, note, a.renderSessionInstructions())
+	}
+	var rows []string
+	for i, item := range a.sessionItems {
+		selected := a.boardFocus == focusSessions && i == a.sessionSelection
+		rows = append(rows, a.renderSessionItem(item, selected, width))
+	}
+	body := strings.Join(rows, "\n")
+	return lipgloss.JoinVertical(lipgloss.Left, title, body, a.renderSessionInstructions())
+}
+
+func (a *App) renderSessionInstructions() string {
+	key := hotkeyLabel(a.statusReturnKey)
+	instructions := fmt.Sprintf("Enter → follow session    %s → return to status", key)
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#AAAAAA")).
+		MarginTop(1).
+		Render(instructions)
+}
+
+func (a *App) renderSessionItem(item sessionItem, selected bool, width int) string {
+	state := titleCase(item.State)
+	phase := titleCase(item.Phase)
+	line1 := fmt.Sprintf("%s · %s", item.Agent, item.Worktree)
+	line2 := fmt.Sprintf("Cycle %d · %s (%s)", item.Cycle, state, phase)
+	line3 := fmt.Sprintf("%d bead(s) · %d pt", item.Beads, item.Points)
+	if item.Window != "" {
+		windowLabel := item.Window
+		if item.WindowActive {
+			windowLabel += " · active"
+		}
+		line3 += fmt.Sprintf(" · tmux %s", windowLabel)
+	} else {
+		line3 += " · idle"
+	}
+	if item.Waiting > 0 {
+		line3 += fmt.Sprintf(" · ⚠ waiting on %d response(s)", item.Waiting)
+	}
+	if !item.LastUpdated.IsZero() {
+		line3 += fmt.Sprintf(" · updated %s ago", humanizeDuration(time.Since(item.LastUpdated)))
+	}
+	content := strings.Join([]string{line1, line2, line3}, "\n")
+	style := lipgloss.NewStyle().Width(max(20, width)).Padding(0, 0, 1, 0)
+	if selected {
+		style = style.Bold(true).Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#5B8DEF")).Padding(0, 1)
+	}
+	return style.Render(content)
+}
+
+func (a *App) fetchStatusSnapshot() tea.Cmd {
+	return func() tea.Msg {
+		return a.buildStatusSnapshot()
+	}
+}
+
+func (a *App) scheduleStatusRefresh() tea.Cmd {
+	return tea.Tick(boardRefreshInterval, func(time.Time) tea.Msg {
+		return a.buildStatusSnapshot()
+	})
+}
+
+func (a *App) buildStatusSnapshot() statusRefreshMsg {
+	phase := a.workflow.CurrentPhase()
+	snapshots, err := a.orchestrator.SessionSnapshots()
+	if err != nil {
+		return statusRefreshMsg{phase: phase, err: err}
+	}
+	windowMap := a.tmuxWindows()
+	items := make([]sessionItem, 0, len(snapshots))
+	for _, snap := range snapshots {
+		ses := sessionItem{
+			Agent:       snap.Worktree.Agent.Name,
+			Worktree:    snap.Worktree.Name,
+			Number:      snap.Worktree.Number,
+			Points:      snap.Worktree.TotalPoints(),
+			Beads:       len(snap.Worktree.Beads),
+			Cycle:       snap.Status.Cycle,
+			Phase:       snap.Status.Phase,
+			State:       snap.Status.State,
+			Questions:   snap.QuestionsTotal,
+			Waiting:     snap.QuestionsWaiting,
+			LastUpdated: snap.LastUpdated,
+		}
+		for _, candidate := range candidateWindowNames(snap) {
+			if info, ok := windowMap[candidate]; ok {
+				ses.Window = info.Name
+				ses.WindowActive = info.Active
+				break
+			}
+		}
+		items = append(items, ses)
+	}
+	cycle, cerr := a.orchestrator.CurrentCycleStatus()
+	hasCycle := true
+	if cerr != nil {
+		if errors.Is(cerr, orchestrator.ErrNoTrackedSessions) {
+			hasCycle = false
+		} else {
+			return statusRefreshMsg{phase: phase, err: cerr}
+		}
+	}
+	return statusRefreshMsg{
+		sessions: items,
+		cycle:    cycle,
+		hasCycle: hasCycle,
+		phase:    phase,
+	}
+}
+
+func (a *App) openSelectedSessionWindow() tea.Cmd {
+	if a.tmuxSession == "" || len(a.sessionItems) == 0 {
+		return nil
+	}
+	item := a.sessionItems[a.sessionSelection]
+	if item.Window == "" {
+		a.statusMsg = fmt.Sprintf("%s · %s is idle", item.Agent, item.Worktree)
+		return nil
+	}
+	target := fmt.Sprintf("%s:%s", a.tmuxSession, item.Window)
+	return func() tea.Msg {
+		_ = exec.Command("tmux", "select-window", "-t", target).Run()
+		return nil
+	}
+}
+
+func (a *App) tmuxWindows() map[string]tmuxWindowInfo {
+	if a.tmuxSession == "" {
+		return map[string]tmuxWindowInfo{}
+	}
+	cmd := exec.Command("tmux", "list-windows", "-t", a.tmuxSession, "-F", "#{window_name}::#{window_active}")
+	output, err := cmd.Output()
+	if err != nil {
+		return map[string]tmuxWindowInfo{}
+	}
+	result := make(map[string]tmuxWindowInfo)
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "::")
+		if len(parts) != 2 {
+			continue
+		}
+		result[parts[0]] = tmuxWindowInfo{Name: parts[0], Active: strings.TrimSpace(parts[1]) == "1"}
+	}
+	return result
+}
+
+func detectTmuxContext() (string, string, error) {
+	cmd := exec.Command("tmux", "display-message", "-p", "#S::#I")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", "", err
+	}
+	parts := strings.Split(strings.TrimSpace(string(output)), "::")
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("unexpected tmux context: %s", strings.TrimSpace(string(output)))
+	}
+	return parts[0], parts[1], nil
+}
+
+func ensureStatusWindow(session, windowIdx, name string) error {
+	if session == "" || windowIdx == "" {
+		return fmt.Errorf("tmux session context missing")
+	}
+	cmd := exec.Command("tmux", "rename-window", "-t", fmt.Sprintf("%s:%s", session, windowIdx), name)
+	return cmd.Run()
+}
+
+func bindStatusReturnKey(session, windowName, hotkey string) error {
+	if session == "" || windowName == "" || hotkey == "" {
+		return fmt.Errorf("missing tmux binding context")
+	}
+	target := fmt.Sprintf("%s:%s", session, windowName)
+	cmd := exec.Command("tmux", "bind-key", "-n", hotkey, "select-window", "-t", target)
+	return cmd.Run()
+}
+
+func candidateWindowNames(snapshot orchestrator.SessionSnapshot) []string {
+	num := snapshot.Worktree.Number
+	cycle := snapshot.Status.Cycle
+	if cycle <= 0 {
+		cycle = 1
+	}
+	return []string{
+		fmt.Sprintf("worktree-agent-%d-%d", num, cycle),
+		fmt.Sprintf("worktree-orchestrator-%d-%d", num, cycle),
+	}
+}
+
+func titleCase(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	return strings.ToUpper(lower[:1]) + lower[1:]
+}
+
+func humanizeDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
+}
+
+func hotkeyLabel(key string) string {
+	if strings.HasPrefix(strings.ToLower(key), "m-") {
+		return fmt.Sprintf("Alt+%s", strings.ToUpper(strings.TrimPrefix(key, "M-")))
+	}
+	return strings.ToUpper(key)
+}
+
+func phasePosition(p workflow.Phase) (int, int) {
+	for i, phase := range phaseOrder {
+		if p == phase {
+			return i, len(phaseOrder)
+		}
+	}
+	return len(phaseOrder), len(phaseOrder)
+}
+
+func upcomingPhases(p workflow.Phase) []workflow.Phase {
+	pos, _ := phasePosition(p)
+	if pos+1 >= len(phaseOrder) {
+		return nil
+	}
+	return phaseOrder[pos+1:]
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

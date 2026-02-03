@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "Bash(dir:*)",
+      "Bash(go build:*)",
+      "Bash(bd help:*)",
+      "Bash(bd create --help:*)",
+      "Bash(C:Usersthe_ggobinbd.exe --help)",
+      "Bash(ls:*)",
+      "Bash(findstr:*)"
+    ]
+  }
+}
