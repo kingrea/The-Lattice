@@ -407,8 +407,10 @@ func (m *Mode) generateAgentFiles(ctx *modes.ModeContext, hires []hiredAgent) er
 	baseDir := ctx.Config.AgentsDir()
 	for _, hire := range hires {
 		roleDir := "workers"
+		roleContext := "worker"
 		if hire.entry.Role == specialistRole {
 			roleDir = "specialists"
+			roleContext = "specialist"
 		}
 		slug := slugifyName(hire.entry.Name)
 		rolePath := filepath.Join(roleDir, slug)
@@ -427,31 +429,27 @@ func (m *Mode) generateAgentFiles(ctx *modes.ModeContext, hires []hiredAgent) er
 		if err != nil {
 			return err
 		}
-		mode := "primary"
-		if hire.entry.Role == specialistRole {
-			mode = "support"
-		}
-		if err := runCreateAgentFileSkill(ctx, hire, rolePath, stagedDir, targetFile, skillPath, mode); err != nil {
+		if err := runCreateAgentFileSkill(ctx, hire, rolePath, stagedDir, targetFile, skillPath, roleContext); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runCreateAgentFileSkill(ctx *modes.ModeContext, hire hiredAgent, rolePath, sourceDir, targetFile, skillPath, mode string) error {
+func runCreateAgentFileSkill(ctx *modes.ModeContext, hire hiredAgent, rolePath, sourceDir, targetFile, skillPath, roleContext string) error {
 	window := fmt.Sprintf("agent-%s-%d", slugifyName(hire.entry.Name), time.Now().UnixNano())
 	if err := createTmuxWindow(window, ctx.Config.ProjectDir); err != nil {
 		return err
 	}
 	defer killTmuxWindow(window)
 	prompt := fmt.Sprintf(
-		"You are preparing %s (%s) for active duty. Load the create-agent-file skill at %s with agent_name=%q, agent_role=%q, mode=%q. Their staged source files live in %s. Write the AGENT.md file to %s and do not finish until it exists and the skill's completion hook has fired.",
+		"You are preparing %s (%s) for active duty. Load the create-agent-file skill at %s with identity_dir=%q, output_path=%q, role_context=%q. These identity materials live in %s—discover every Markdown file, honor their voice, and capture the sources you use. Write the AGENT.md file to %s and emit the skill's completion hook once it exists.",
 		hire.entry.Name,
 		hire.entry.Role,
 		skillPath,
-		hire.entry.Name,
-		rolePath,
-		mode,
+		sourceDir,
+		targetFile,
+		roleContext,
 		sourceDir,
 		targetFile,
 	)

@@ -574,7 +574,7 @@ func (o *Orchestrator) buildManualReviewPrompt(projectDesc string) string {
 }
 
 // GenerateAgentFile runs the create-agent-file skill to write ./lattice/agents/<role>/AGENT.md
-func (o *Orchestrator) GenerateAgentFile(agent Agent, role, mode string) (string, error) {
+func (o *Orchestrator) GenerateAgentFile(agent Agent, role, roleContext string) (string, error) {
 	sourceDir := filepath.Join(o.config.CVsDir(), agent.Community, agent.Name)
 	if _, err := os.Stat(sourceDir); err != nil {
 		return "", fmt.Errorf("orchestrator source files missing for %s: %w", agent.Name, err)
@@ -587,8 +587,8 @@ func (o *Orchestrator) GenerateAgentFile(agent Agent, role, mode string) (string
 
 	targetFile := filepath.Join(roleFolder, "AGENT.md")
 
-	if err := o.runAgentSkill(agent, role, mode, sourceDir, targetFile, false); err != nil {
-		if err := o.runAgentSkill(agent, role, mode, sourceDir, targetFile, true); err != nil {
+	if err := o.runAgentSkill(agent, role, roleContext, sourceDir, targetFile, false); err != nil {
+		if err := o.runAgentSkill(agent, role, roleContext, sourceDir, targetFile, true); err != nil {
 			return "", err
 		}
 	}
@@ -600,13 +600,13 @@ func (o *Orchestrator) GenerateAgentFile(agent Agent, role, mode string) (string
 	return targetFile, nil
 }
 
-func (o *Orchestrator) runAgentSkill(agent Agent, role, mode, sourceDir, targetFile string, strict bool) error {
+func (o *Orchestrator) runAgentSkill(agent Agent, role, roleContext, sourceDir, targetFile string, strict bool) error {
 	_ = os.Remove(targetFile)
 	skillPath, err := skills.Ensure(o.config.SkillsDir(), skills.CreateAgentFile)
 	if err != nil {
 		return err
 	}
-	prompt := o.buildAgentSkillPrompt(agent, role, mode, sourceDir, targetFile, skillPath, strict)
+	prompt := o.buildAgentSkillPrompt(agent, role, roleContext, sourceDir, targetFile, skillPath, strict)
 	windowName := fmt.Sprintf("agent-file-%d", time.Now().UnixNano())
 	if err := o.createTmuxWindow(windowName); err != nil {
 		return fmt.Errorf("failed to start tmux window for agent file: %w", err)
@@ -620,16 +620,17 @@ func (o *Orchestrator) runAgentSkill(agent Agent, role, mode, sourceDir, targetF
 	return o.waitForFile(targetFile, 5*time.Minute)
 }
 
-func (o *Orchestrator) buildAgentSkillPrompt(agent Agent, role, mode, sourceDir, targetFile, skillPath string, strict bool) string {
+func (o *Orchestrator) buildAgentSkillPrompt(agent Agent, role, roleContext, sourceDir, targetFile, skillPath string, strict bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are running inside a tmux worker window. Load the skill definition at %s and execute it. ", skillPath)
-	fmt.Fprintf(&b, "Inputs: agent_name=%s, agent_role=%s, mode=%s. ", agent.Name, role, mode)
-	fmt.Fprintf(&b, "Source material lives in %s. Write the AGENT.md file to %s. ", sourceDir, targetFile)
-	b.WriteString("Use the skill's mandated AGENT.md shape and include the completion hook by emitting the [tmux-hook] line once finished. ")
+	fmt.Fprintf(&b, "This brief will live under lattice/agents/%s. ", role)
+	fmt.Fprintf(&b, "Inputs: identity_dir=%s, output_path=%s, role_context=%s. ", sourceDir, targetFile, roleContext)
+	fmt.Fprintf(&b, "Identity materials live in %s. Write the AGENT.md file to %s and record every Markdown source you draw from. ", sourceDir, targetFile)
+	b.WriteString("Use the skill's provenance frontmatter requirements and include the completion hook by emitting the [tmux-hook] line once finished. ")
 	if strict {
 		b.WriteString("This is a retry because the destination file was missing. You are NOT done until the AGENT.md file exists at the destination with the latest timestamp. ")
 	}
-	b.WriteString("Double-check the file before signalling completion.")
+	b.WriteString("Double-check that the Sources section lists every document before signalling completion.")
 	return b.String()
 }
 
@@ -704,7 +705,7 @@ func (o *Orchestrator) ensureOrchestratorAgentFile(agent Agent) error {
 		return fmt.Errorf("orchestrator agent name is required")
 	}
 	rolePath := filepath.Join("orchestrator", slugifyToken(agent.Name))
-	_, err := o.GenerateAgentFile(agent, rolePath, "primary")
+	_, err := o.GenerateAgentFile(agent, rolePath, "orchestrator")
 	return err
 }
 
