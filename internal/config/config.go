@@ -6,14 +6,52 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-// LatticeDir is the name of the directory we create in each project
-const LatticeDir = ".lattice"
+const (
+	// LatticeDir is the name of the directory we create in each project
+	LatticeDir = ".lattice"
 
-// Config holds the runtime configuration for Lattice
+	defaultWorkflowID = "commission-work"
+)
+
+// CommunityRef declares one community source entry inside .lattice/config.yaml.
+type CommunityRef struct {
+	Name       string `yaml:"name"`
+	Source     string `yaml:"source"`
+	Repository string `yaml:"repository,omitempty"`
+	Path       string `yaml:"path,omitempty"`
+}
+
+// CoreAgentOverride defines how a core role should be fulfilled.
+type CoreAgentOverride struct {
+	Source string `yaml:"source"`
+	Path   string `yaml:"path,omitempty"`
+}
+
+// WorkflowConfig captures workflow preferences.
+type WorkflowConfig struct {
+	Default   string   `yaml:"default"`
+	Available []string `yaml:"available,omitempty"`
+}
+
+// ProjectConfig models .lattice/config.yaml.
+type ProjectConfig struct {
+	Version     int                          `yaml:"version"`
+	Communities []CommunityRef               `yaml:"communities"`
+	CoreAgents  map[string]CoreAgentOverride `yaml:"core_agents"`
+	Workflows   WorkflowConfig               `yaml:"workflows"`
+}
+
+// Config holds the runtime configuration for Lattice.
 type Config struct {
 	// ProjectDir is the directory where the user ran `lattice` from
 	ProjectDir string
@@ -24,6 +62,8 @@ type Config struct {
 
 	// LatticeProjectDir is ProjectDir/.lattice
 	LatticeProjectDir string
+
+	Project ProjectConfig
 }
 
 // InitLatticeDir creates the .lattice directory structure in the given project directory.
@@ -73,8 +113,8 @@ func InitLatticeDir(projectDir string) error {
 	return nil
 }
 
-// NewConfig creates a new Config instance
-func NewConfig(projectDir string) *Config {
+// NewConfig creates a new Config instance populated with project settings.
+func NewConfig(projectDir string) (*Config, error) {
 	// TODO: Make this configurable via env var or config file
 	// For now, hardcode your path. On Windows/WSL this would be something like:
 	// /mnt/g/The Lattice
@@ -83,11 +123,18 @@ func NewConfig(projectDir string) *Config {
 		latticeRoot = "/mnt/g/The Lattice" // Default for your setup
 	}
 
-	return &Config{
+	cfg := &Config{
 		ProjectDir:        projectDir,
 		LatticeRoot:       latticeRoot,
 		LatticeProjectDir: filepath.Join(projectDir, LatticeDir),
+		Project:           defaultProjectConfig(),
 	}
+
+	if err := cfg.loadProjectConfig(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 // CVsDir returns the path to the CVs directory for the current project
@@ -133,4 +180,175 @@ func (c *Config) WorktreeDir() string {
 // SkillsDir returns the directory where bundled skills are installed per project
 func (c *Config) SkillsDir() string {
 	return filepath.Join(c.LatticeProjectDir, "skills")
+}
+
+// ProjectConfigPath returns the on-disk location for the project config file.
+func (c *Config) ProjectConfigPath() string {
+	return filepath.Join(c.LatticeProjectDir, "config.yaml")
+}
+
+// Communities returns the list of configured community references.
+func (c *Config) Communities() []CommunityRef {
+	return c.Project.Communities
+}
+
+// CoreAgentOverride returns override configuration for a given role.
+func (c *Config) CoreAgentOverride(role string) (CoreAgentOverride, bool) {
+	ovr, ok := c.Project.CoreAgents[role]
+	return ovr, ok
+}
+
+// DefaultWorkflow returns the configured default workflow identifier.
+func (c *Config) DefaultWorkflow() string {
+	return c.Project.Workflows.Default
+}
+
+func (c *Config) loadProjectConfig() error {
+	path := c.ProjectConfigPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("config: read %s: %w", path, err)
+	}
+
+	var parsed ProjectConfig
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		return fmt.Errorf("config: parse %s: %w", path, err)
+	}
+
+	parsed.applyDefaults()
+	parsed.normalize(c.ProjectDir)
+	if err := parsed.validate(); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+
+	c.Project = parsed
+	return nil
+}
+
+func defaultProjectConfig() ProjectConfig {
+	return ProjectConfig{
+		Version:    1,
+		CoreAgents: map[string]CoreAgentOverride{},
+		Workflows: WorkflowConfig{
+			Default: defaultWorkflowID,
+		},
+	}
+}
+
+func (pc *ProjectConfig) applyDefaults() {
+	if pc.Version == 0 {
+		pc.Version = 1
+	}
+	if pc.CoreAgents == nil {
+		pc.CoreAgents = map[string]CoreAgentOverride{}
+	}
+}
+
+func (pc *ProjectConfig) normalize(base string) {
+	for i := range pc.Communities {
+		pc.Communities[i].normalize(base)
+	}
+	for role, override := range pc.CoreAgents {
+		override.normalize(base)
+		pc.CoreAgents[role] = override
+	}
+	pc.Workflows.Default = strings.TrimSpace(pc.Workflows.Default)
+	if pc.Workflows.Default == "" {
+		pc.Workflows.Default = defaultWorkflowID
+	}
+	if len(pc.Workflows.Available) > 0 && !contains(pc.Workflows.Available, pc.Workflows.Default) {
+		pc.Workflows.Available = append(pc.Workflows.Available, pc.Workflows.Default)
+	}
+}
+
+func (pc *ProjectConfig) validate() error {
+	if pc.Version < 1 {
+		return fmt.Errorf("config version must be >= 1")
+	}
+	for i := range pc.Communities {
+		if err := pc.Communities[i].validate(); err != nil {
+			return fmt.Errorf("communities[%d]: %w", i, err)
+		}
+	}
+	for role, override := range pc.CoreAgents {
+		if err := override.validate(); err != nil {
+			return fmt.Errorf("core_agents[%s]: %w", role, err)
+		}
+	}
+	if strings.TrimSpace(pc.Workflows.Default) == "" {
+		return fmt.Errorf("workflows.default is required")
+	}
+	return nil
+}
+
+func (ref *CommunityRef) normalize(base string) {
+	ref.Name = strings.TrimSpace(ref.Name)
+	ref.Source = normalizeSource(ref.Source)
+	ref.Repository = strings.TrimSpace(ref.Repository)
+	ref.Path = resolvePath(base, ref.Path)
+}
+
+func (ref CommunityRef) validate() error {
+	if ref.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	switch ref.Source {
+	case "github":
+		if ref.Repository == "" {
+			return fmt.Errorf("repository is required for github communities")
+		}
+	case "local":
+		if ref.Path == "" {
+			return fmt.Errorf("path is required for local communities")
+		}
+	default:
+		return fmt.Errorf("source must be 'github' or 'local'")
+	}
+	return nil
+}
+
+func (ovr *CoreAgentOverride) normalize(base string) {
+	ovr.Source = normalizeSource(ovr.Source)
+	ovr.Path = resolvePath(base, ovr.Path)
+}
+
+func (ovr CoreAgentOverride) validate() error {
+	switch ovr.Source {
+	case "", "default":
+		return nil
+	case "custom":
+		if ovr.Path == "" {
+			return fmt.Errorf("path is required for custom core agents")
+		}
+		return nil
+	default:
+		return fmt.Errorf("source must be 'default' or 'custom'")
+	}
+}
+
+func normalizeSource(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func contains(values []string, target string) bool {
+	for _, v := range values {
+		if strings.EqualFold(strings.TrimSpace(v), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func resolvePath(base, candidate string) string {
+	trimmed := strings.TrimSpace(candidate)
+	if trimmed == "" {
+		return ""
+	}
+	if filepath.IsAbs(trimmed) {
+		return filepath.Clean(trimmed)
+	}
+	return filepath.Clean(filepath.Join(base, trimmed))
 }

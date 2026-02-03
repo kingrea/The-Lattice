@@ -22,6 +22,9 @@ import (
 )
 
 func main() {
+	if handleValidateAgentCommand() {
+		return
+	}
 	// Get the current working directory - this is the "project" we're working in
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -43,11 +46,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	app, err := tui.NewApp(cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error preparing lattice app: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Create and run the TUI
 	// tea.NewProgram creates a new bubbletea application
 	// tui.NewApp returns our main application model
 	p := tea.NewProgram(
-		tui.NewApp(cwd),
+		app,
 		tea.WithAltScreen(), // Use alternate screen buffer (like vim does)
 	)
 

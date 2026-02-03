@@ -145,8 +145,11 @@ func (i menuItem) Description() string { return i.desc }
 func (i menuItem) FilterValue() string { return i.title }
 
 // NewApp creates a new App instance
-func NewApp(projectDir string) *App {
-	cfg := config.NewConfig(projectDir)
+func NewApp(projectDir string) (*App, error) {
+	cfg, err := config.NewConfig(projectDir)
+	if err != nil {
+		return nil, err
+	}
 	wf := workflow.New(cfg.LatticeProjectDir)
 	orch := orchestrator.New(cfg)
 	logPath := filepath.Join(cfg.LatticeProjectDir, "logs", "journey.log")
@@ -187,7 +190,7 @@ func NewApp(projectDir string) *App {
 			_ = bindStatusReturnKey(session, statusWindowName, statusReturnHotkey)
 		}
 	}
-	return app
+	return app, nil
 }
 
 // buildMainMenu creates the main menu items based on workflow state
