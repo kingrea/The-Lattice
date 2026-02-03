@@ -1,5 +1,5 @@
 default_community:
   name: The Lumen
-  repository: https://github.com/[user]/the-lumen
-  # or local path for development:
-  # path: ../communities/the-lumen
+  repository: https://github.com/the-lattice/the-lumen
+  # local path for development:
+  path: ../the-lumen
