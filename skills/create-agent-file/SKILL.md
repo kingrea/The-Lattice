@@ -1,9 +1,9 @@
 ---
 name: create-agent-file
 description:
-  Distill a denizen's working folder into a runnable AGENT.md profile so the
-  lattice CLI can slot them into a role (orchestrator, code-review, support,
-  etc.).
+  Distill whatever identity materials live inside an agent's folder into a fresh
+  AGENT.md that any lattice role can load without knowing that community's
+  conventions.
 license: MIT
 compatibility: opencode
 metadata:
@@ -11,113 +11,120 @@ metadata:
   ritual: false
 ---
 
-## What I do
+## Purpose
 
-I take the raw denizen files that were staged inside `.lattice/setup/cvs/` and
-compress them into a single `AGENT.md` file that the calling project can keep in
-`./lattice/agents/<role>/`. The result is an operational brief: who this agent
-is, what mode they'll serve in, how to deploy them, and which edges to respect.
+Given nothing more than a path to an identity folder, assemble an operational
+AGENT.md. Discover every relevant Markdown file (including `cv.md` if present),
+absorb the voice and working notes inside, and merge them into a single brief
+that records where the information came from.
 
 ## Required Inputs
 
-| Name         | Type   | Description                                                                 |
-| ------------ | ------ | --------------------------------------------------------------------------- |
-| `agent_name` | string | Denizen name exactly as written on disk                                     |
-| `agent_role` | string | The lattice role folder to write under (e.g. `orchestrator`, `code-review`) |
-| `mode`       | enum   | How the agent will be used: `primary`, `support`, or `review`               |
+| Name           | Type | Description                                                                             |
+| -------------- | ---- | --------------------------------------------------------------------------------------- |
+| `identity_dir` | path | Absolute path to the agent's identity folder. The folder layout is arbitrary.           |
+| `output_path`  | path | Absolute path to the AGENT.md file that must be written (create directories as needed). |
+| `role_context` | enum | One of `worker`, `specialist`, or `orchestrator`. Shapes tone + emphasis.               |
 
-All three inputs are required. Reject the run if any are missing.
+Reject the run if any input is empty or if `role_context` is outside the allowed
+set.
 
-## Source Material
+## Source Discovery
 
-- Directory: `.lattice/setup/cvs/<community>/<agent_name>/`
-- Expect (at minimum): `cv.md`, `soul.md`, `<agent>.md`, `core-memories.md`,
-  `inner-life.md`, `interests.md`
-- Preserve any extra docs (playbooks, rituals) as reference quotes in the output
-  if relevant.
+1. List every `.md` file at the top level of `identity_dir`. Do not assume
+   canonical names; accept irregular spellings.
+2. If a `cv.md` exists, treat it as a quick orientation doc and read it first.
+3. Ignore non-Markdown files entirely unless the caller explicitly adds support.
+4. Track every file you actually quote or synthesize from so you can report it
+   in both the frontmatter and the Sources section.
+5. If the folder includes subdirectories, only descend one level when the folder
+   name clearly signals writing (e.g. `memories/*.md`). Otherwise stay shallow.
 
 ## Output
 
-Write (and overwrite) the file:
+Write (and overwrite) the file at `output_path`.
 
-```
-./lattice/agents/<agent_role>/AGENT.md
-```
-
-This path is relative to the project that invoked `lattice`. Create intermediate
-directories if necessary.
-
-### AGENT.md shape
+### Mandatory frontmatter
 
 ```
 ---
-name: <agent_name>
-role: <agent_role>
-mode: <mode>
-community: <community>
-origin: <relative path inside .lattice/setup/cvs>
-last_synced: <ISO8601 timestamp>
+lattice:
+  type: agent-file
+  version: 1
+  generated: <ISO8601 timestamp>
+  source:
+    community: <community name if known, else unknown>
+    agent: <best available agent name>
+    files_used:
+      - <relative-or-base filename for each Markdown input>
+  role: <role_context>
+name: <agent display name>
+mode: <worker/specialist/orchestrator framing note>
 ---
-
-# Mandate
-Short mission statement for why this agent was slotted into this role.
-
-# Operating Rhythm
-How they like to receive work, collaborate, and report back.
-
-# Playbook
-Bullet list of 3-5 concrete moves they will reach for inside this role.
-
-# Edges & Safeguards
-Honest constraints pulled from their CV / identity docs and how to protect
-against them in this role.
-
-# Current Materials
-Link-style bullet list pointing back to the staged files used to craft this
-profile so another agent can rehydrate full context if needed.
 ```
 
-Use their `cv.md` for high-level attributes and their identity files for nuance.
+If the community or agent name cannot be inferred from frontmatter, fall back to
+folder names and note any uncertainty inside the Sources section.
+
+### Body shape
+
+```
+# <Agent Name>
+
+## Mandate
+Orient the reader to why this agent is valuable inside the requested
+role_context. Tie back to the strongest identity statements.
+
+## Working Rhythm
+How they intake work, collaborate, and hand back outcomes.
+
+## Capabilities & Tools
+Concrete moves they repeatedly reach for (3-5 bullets anchored in the sources).
+
+## Guardrails
+Edges, failure modes, and how to keep them in peak form.
+
+## Sources
+Bullet list calling out each file used (filename + one-line why it mattered).
+```
+
+Feel free to add short inline quotes when it preserves voice, but synthesize the
+actionable interpretation in your own words.
 
 ## Process
 
-1. Validate inputs: ensure `agent_name`, `agent_role`, and `mode` are non-empty.
-   Accept only `primary`, `support`, or `review` for `mode`.
-2. Locate the staged folder under
-   `.lattice/setup/cvs/<community>/<agent_name>/`. Abort if missing.
-3. Read every file so nuance carries forward. Prefer direct quotations where
-   voice matters (inner-life, soul) and synthesize actionable statements for the
-   new role.
-4. Write `AGENT.md` exactly in the shape above. Always overwrite, but keep the
-   tone aligned with existing lattice docs (second-person friendly brief).
-5. Append a short verification footer at the bottom noting when and by which
-   skill run the file was produced.
+1. Validate parameters and confirm `identity_dir` exists.
+2. Enumerate Markdown files per **Source Discovery** and read their contents.
+3. Pull structured metadata from any YAML frontmatter you encounter (CVs, soul
+   files, etc.) so the AGENT.md inherits accurate names and communities.
+4. Draft each section with clear, role-aware language. The agent's voice leads,
+   but the brief must remain actionable for the requestor.
+5. Populate the provenance frontmatter (`source.files_used`) with the file names
+   actually used, ordered roughly by importance.
+6. Close with the `## Sources` section that mirrors the list and includes simple
+   annotations ("`cv.md` — strengths + constraints").
+7. Save to `output_path` atomically, ensuring the file exists and is non-empty
+   before signalling completion.
 
 ## Completion Hook
 
-When (and only when) the destination file exists and is fully written, trigger
-the tmux notification hook so the orchestrator window knows it can hand control
-back. Do this by emitting the literal line:
+After the AGENT.md file is written, emit exactly one line:
 
 ```
-[tmux-hook] agent-file-created
+[tmux-hook] agent-file-created {"identity_dir":"...","output_path":"...","role_context":"..."}
 ```
 
-Include a JSON blob on the same line with `agent_name`, `agent_role`, `mode`,
-and `path`. The lattice CLI listens for that hook to decide whether to verify or
-re-run you with a stricter prompt.
-
-If verification fails (file missing, malformed), expect the caller to run you
-again with explicit instructions that you are not done until the file exists.
+Update the JSON keys to reflect the inputs you received. Do not fire the hook if
+the file is missing or if validation failed.
 
 ## Guidance
 
-- Stay specific. The AGENT file should tell another practitioner _exactly_ how
-  to wield this agent inside the named role.
-- Quote the denizen directly where it adds colour, but translate into actionable
-  steps when needed.
-- Make the playbook concrete ("Map repositories, tag owners, enforce freeze")
-  instead of generic skills.
-- Do not invent new memories—only remix what is in the staged folder.
-- Respect the mode: a `primary` orchestrator gets decisive language; a `support`
-  agent should feel invitational.
+- Do not assume canonical filenames; adapt to whatever Markdown files exist.
+- Prefer cv frontmatter for canonical spellings, but never block if it is
+  missing.
+- Quote sparingly and only to anchor tone; otherwise keep guidance imperative
+  and role-aware.
+- If critical files are missing, explain the gap inside `## Guardrails` or the
+  `## Sources` section so future maintainers know what to fix.
+- Preserve each agent's flavor without sacrificing clarity for the humans who
+  will run them.

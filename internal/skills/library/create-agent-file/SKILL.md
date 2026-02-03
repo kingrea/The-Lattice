@@ -1,58 +1,58 @@
-## ++ Begin Patch
-
-name: create-agent-file description: Distill a denizen's working folder into a
-runnable AGENT.md profile so the lattice CLI can slot them into a role
-(orchestrator, code-review, support, etc.). license: MIT compatibility: opencode
-metadata: lattice-component: terminal ritual: false
-
+---
+name: create-agent-file
+description:
+  Synthesize any agent identity folder into a runnable AGENT.md profile, using
+  whatever materials are available without assuming specific file names.
+license: MIT
+compatibility: opencode
+metadata:
+  lattice-component: terminal
+  ritual: false
 ---
 
 ## What I do
 
-I take the raw denizen files that were staged inside `.lattice/setup/cvs/` and
-compress them into a single `AGENT.md` file that the calling project can keep in
-`./lattice/agents/<role>/`. The result is an operational brief: who this agent
-is, what mode they'll serve in, how to deploy them, and which edges to respect.
+I take an arbitrary agent identity folder and compress it into a single
+`AGENT.md` file. The result is an operational brief: who this agent is, how they
+work, and how to deploy them in the requested role context.
 
 ## Required Inputs
 
-| Name         | Type   | Description                                                                 |
-| ------------ | ------ | --------------------------------------------------------------------------- |
-| `agent_name` | string | Denizen name exactly as written on disk                                     |
-| `agent_role` | string | The lattice role folder to write under (e.g. `orchestrator`, `code-review`) |
-| `mode`       | enum   | How the agent will be used: `primary`, `support`, or `review`               |
+| Name              | Type   | Description                                                    |
+| ----------------- | ------ | -------------------------------------------------------------- |
+| `identity_folder` | string | Path to the agent identity directory                           |
+| `output_path`     | string | Destination path for the generated `AGENT.md`                  |
+| `role_context`    | enum   | How to frame the agent: `worker`, `specialist`, `orchestrator` |
 
 All three inputs are required. Reject the run if any are missing.
 
 ## Source Material
 
-- Directory: `.lattice/setup/cvs/<community>/<agent_name>/`
-- Expect (at minimum): `cv.md`, `soul.md`, `<agent>.md`, `core-memories.md`,
-  `inner-life.md`, `interests.md`
-- Preserve any extra docs (playbooks, rituals) as reference quotes in the output
-  if relevant.
+- Directory: the provided `identity_folder`
+- Discover all `.md` files in the folder. Do not assume specific filenames.
+- If `cv.md` exists, read it first for fast context.
+- Read all other `.md` files and capture their voice and constraints.
 
 ## Output
 
-Write (and overwrite) the file:
-
-```
-./lattice/agents/<agent_role>/AGENT.md
-```
-
-This path is relative to the project that invoked `lattice`. Create intermediate
-directories if necessary.
+Write (and overwrite) the file at `output_path`. Create intermediate directories
+if necessary.
 
 ### AGENT.md shape
 
 ```
 ---
-name: <agent_name>
-role: <agent_role>
-mode: <mode>
-community: <community>
-origin: <relative path inside .lattice/setup/cvs>
-last_synced: <ISO8601 timestamp>
+lattice:
+  type: agent-file
+  version: 1
+  generated: <ISO8601 timestamp>
+  source:
+    community: <community if known else unknown>
+    agent: <agent name if known else unknown>
+    files_used:
+      - <file1.md>
+      - <file2.md>
+  role: worker | specialist | orchestrator
 ---
 
 # Mandate
@@ -65,29 +65,33 @@ How they like to receive work, collaborate, and report back.
 Bullet list of 3-5 concrete moves they will reach for inside this role.
 
 # Edges & Safeguards
-Honest constraints pulled from their CV / identity docs and how to protect
-against them in this role.
+Honest constraints pulled from their identity docs and how to protect against
+them in this role.
 
 # Current Materials
-Link-style bullet list pointing back to the staged files used to craft this
-profile so another agent can rehydrate full context if needed.
+Link-style bullet list pointing back to the files used to craft this profile so
+another agent can rehydrate full context if needed.
+
+# Sources Used
+Short note listing the key inputs (including whether `cv.md` was present).
 ```
 
-Use their `cv.md` for high-level attributes and their identity files for nuance.
+Use `cv.md` for high-level attributes when present and other identity files for
+nuance.
 
 ## Process
 
-1. Validate inputs: ensure `agent_name`, `agent_role`, and `mode` are non-empty.
-   Accept only `primary`, `support`, or `review` for `mode`.
-2. Locate the staged folder under
-   `.lattice/setup/cvs/<community>/<agent_name>/`. Abort if missing.
-3. Read every file so nuance carries forward. Prefer direct quotations where
-   voice matters (inner-life, soul) and synthesize actionable statements for the
-   new role.
+1. Validate inputs: ensure `identity_folder`, `output_path`, and `role_context`
+   are non-empty. Accept only `worker`, `specialist`, or `orchestrator` for
+   `role_context`.
+2. List all `.md` files inside `identity_folder`. If none exist, abort.
+3. If `cv.md` exists, read it first for quick context. Then read all other `.md`
+   files so nuance carries forward. Prefer direct quotations where voice matters
+   and synthesize actionable statements for the new role.
 4. Write `AGENT.md` exactly in the shape above. Always overwrite, but keep the
    tone aligned with existing lattice docs (second-person friendly brief).
-5. Append a short verification footer at the bottom noting when and by which
-   skill run the file was produced.
+5. In the frontmatter, populate `files_used` with the filenames you read. Fill
+   `community` and `agent` if clearly stated; otherwise use `unknown`.
 
 ## Completion Hook
 
@@ -99,21 +103,21 @@ back. Do this by emitting the literal line:
 [tmux-hook] agent-file-created
 ```
 
-Include a JSON blob on the same line with `agent_name`, `agent_role`, `mode`,
-and `path`. The lattice CLI listens for that hook to decide whether to verify or
-re-run you with a stricter prompt.
+Include a JSON blob on the same line with `identity_folder`, `output_path`, and
+`role_context`. The lattice CLI listens for that hook to decide whether to
+verify or re-run you with a stricter prompt.
 
 If verification fails (file missing, malformed), expect the caller to run you
 again with explicit instructions that you are not done until the file exists.
 
 ## Guidance
 
-- Stay specific. The AGENT file should tell another practitioner _exactly_ how
-  to wield this agent inside the named role.
+- Stay specific. The AGENT file should tell another practitioner exactly how to
+  wield this agent inside the named role.
 - Quote the denizen directly where it adds colour, but translate into actionable
   steps when needed.
 - Make the playbook concrete ("Map repositories, tag owners, enforce freeze")
   instead of generic skills.
-- Do not invent new memories—only remix what is in the staged folder.
-- Respect the mode: a `primary` orchestrator gets decisive language; a `support`
-  agent should feel invitational.
+- Do not invent new memories. Only remix what is in the identity folder.
+- Respect the role context: an `orchestrator` should sound decisive, a `worker`
+  should feel pragmatic, a `specialist` should feel precise and focused.
