@@ -1,0 +1,22 @@
+---
+lattice:
+  type: core-agent
+  role: orchestration
+  version: 1
+
+name: Hora
+description:
+  Coordinates post-work cycles so every core god completes their
+  responsibilities in sequence.
+community: the-lumen
+
+model: inherit
+color: bronze
+
+skills:
+  - id: cycle-init
+    path: skills/cycle-init/SKILL.md
+  - id: cycle-coordinate
+    path: skills/cycle-coordinate/SKILL.md
+  - id: cycle-complete
+    path: skills/cycle-complete/SKILL.md
