@@ -23,6 +23,33 @@ const (
 	defaultWorkflowID = "commission-work"
 )
 
+const defaultProjectConfigYAML = `# lattice project configuration
+version: 1
+
+# Communities to load. Use source: github with a repository URL or source: local with a relative path.
+communities:
+  - name: the-lumen
+    source: github
+    repository: https://github.com/yourusername/the-lumen
+    # Example local override:
+    # source: local
+    # path: ../communities/the-lumen
+
+# Core agent overrides. Leave as default unless you have custom implementations.
+core_agents:
+  memory-manager:
+    source: default
+  orchestration:
+    source: default
+  community-memory:
+    source: default
+  emergence:
+    source: default
+
+workflows:
+  default: commission-work
+`
+
 // CommunityRef declares one community source entry inside .lattice/config.yaml.
 type CommunityRef struct {
 	Name       string `yaml:"name"`
@@ -108,6 +135,10 @@ func InitLatticeDir(projectDir string) error {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
 		}
+	}
+
+	if err := ensureProjectConfig(filepath.Join(latticeDir, "config.yaml")); err != nil {
+		return err
 	}
 
 	return nil
@@ -351,4 +382,13 @@ func resolvePath(base, candidate string) string {
 		return filepath.Clean(trimmed)
 	}
 	return filepath.Clean(filepath.Join(base, trimmed))
+}
+
+func ensureProjectConfig(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return os.WriteFile(path, []byte(defaultProjectConfigYAML), 0644)
 }

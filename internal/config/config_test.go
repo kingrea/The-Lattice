@@ -96,3 +96,19 @@ communities:
 		t.Fatalf("expected validation error but got none")
 	}
 }
+
+func TestInitLatticeDirCreatesProjectConfigTemplate(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := InitLatticeDir(projectDir); err != nil {
+		t.Fatalf("InitLatticeDir failed: %v", err)
+	}
+	configPath := filepath.Join(projectDir, ".lattice", "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("expected config.yaml to exist: %v", err)
+	}
+	contents := string(data)
+	if !strings.Contains(contents, "version: 1") {
+		t.Fatalf("expected default config template, got %s", contents)
+	}
+}
