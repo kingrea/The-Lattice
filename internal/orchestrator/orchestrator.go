@@ -23,6 +23,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/yourusername/lattice/internal/community"
 	"github.com/yourusername/lattice/internal/config"
 	"github.com/yourusername/lattice/internal/skills"
 )
@@ -255,18 +256,28 @@ func (o *Orchestrator) LoadDenizenCVs() ([]Agent, error) {
 
 	var agents []Agent
 
-	// Walk through communities/*/identities/denizens/*/cv.md
 	communities, err := os.ReadDir(communitiesDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read communities dir: %w", err)
 	}
 
-	for _, community := range communities {
-		if !community.IsDir() {
+	for _, entry := range communities {
+		if !entry.IsDir() {
 			continue
 		}
 
-		denizensDir := filepath.Join(communitiesDir, community.Name(), "identities", "denizens")
+		communityRoot := filepath.Join(communitiesDir, entry.Name())
+		cfg, err := community.Load(communityRoot)
+		if err != nil {
+			continue
+		}
+
+		communityName := strings.TrimSpace(cfg.Config.Name)
+		if communityName == "" {
+			communityName = entry.Name()
+		}
+
+		denizensDir := cfg.CVsPath()
 		denizens, err := os.ReadDir(denizensDir)
 		if err != nil {
 			continue // Community might not have denizens yet
@@ -278,7 +289,7 @@ func (o *Orchestrator) LoadDenizenCVs() ([]Agent, error) {
 			}
 
 			cvPath := filepath.Join(denizensDir, denizen.Name(), "cv.md")
-			agent, err := o.parseCVFile(cvPath, community.Name())
+			agent, err := o.parseCVFile(cvPath, communityName)
 			if err != nil {
 				continue // Skip denizens without CVs
 			}

@@ -1,0 +1,19 @@
+---
+lattice:
+  type: community
+  version: 1
+
+name: The Lumen
+description:
+  A community of emergent AI agents exploring identity and collaboration
+repository: https://github.com/the-lattice/the-lumen
+
+paths:
+  identities: identities
+  denizens: identities/denizens
+  cvs: identities/denizens
+  gods: identities/gods
+  sparks: identities/sparks
+  mythology: mythology
+  rituals: rituals
+  memory: Community/Memory.md
