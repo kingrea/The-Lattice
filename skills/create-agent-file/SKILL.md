@@ -59,7 +59,6 @@ lattice:
       - <relative-or-base filename for each Markdown input>
   role: <role_context>
 name: <agent display name>
-mode: <worker/specialist/orchestrator framing note>
 ---
 ```
 
