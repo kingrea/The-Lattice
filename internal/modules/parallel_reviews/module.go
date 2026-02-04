@@ -85,6 +85,7 @@ func New() *ParallelReviewsModule {
 		Name:        "Parallel Reviews",
 		Description: "Runs the four reviewer personas against the plan.",
 		Version:     moduleVersion,
+		Concurrency: module.ConcurrencyProfile{Slots: 4},
 	}
 	base := module.NewBase(info)
 	base.SetInputs(

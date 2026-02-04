@@ -86,17 +86,18 @@ func (s *Scheduler) Runnable(req RunnableRequest) (RunnableBatch, error) {
 	rq := newRunnableQueue(queue)
 	running := req.runningSet()
 	manual := req.manualGateSet()
-	maxBatch := req.batchLimit(rq.Len(), len(running))
+	inventory := s.concurrencyInventory(running)
 	result := RunnableBatch{}
-	if maxBatch == 0 {
-		if req.MaxParallel > 0 && len(running) >= req.MaxParallel {
-			ready := s.resolver.Ready()
-			if len(ready) > 0 {
-				result.addSkip(ready[0].ID, SkipReason{Reason: SkipReasonConcurrency, Detail: fmt.Sprintf("max parallel %d reached", req.MaxParallel)})
-			}
-		}
+	if req.MaxParallel > 0 && inventory.slots >= req.MaxParallel {
+		s.recordConcurrencySkip(&result, fmt.Sprintf("max parallel %d reached", req.MaxParallel))
 		return result, nil
 	}
+	if inventory.exclusiveID != "" {
+		s.recordConcurrencySkip(&result, fmt.Sprintf("%s requires exclusive execution", inventory.exclusiveID))
+		return result, nil
+	}
+	maxBatch := req.batchNodeLimit(rq.Len())
+	batchSlots := 0
 	for rq.Len() > 0 {
 		node := rq.Pop()
 		if node == nil {
@@ -118,8 +119,22 @@ func (s *Scheduler) Runnable(req RunnableRequest) (RunnableBatch, error) {
 			result.addSkip(node.ID, SkipReason{Reason: SkipReasonManualGate, Detail: note})
 			continue
 		}
+		nodeSlots := nodeSlotCost(node)
+		nodeExclusive := nodeRequiresExclusive(node)
+		if nodeExclusive && (inventory.slots > 0 || batchSlots > 0) {
+			result.addSkip(node.ID, SkipReason{Reason: SkipReasonConcurrency, Detail: "requires exclusive execution"})
+			continue
+		}
+		if req.MaxParallel > 0 && inventory.slots+batchSlots+nodeSlots > req.MaxParallel {
+			result.addSkip(node.ID, SkipReason{Reason: SkipReasonConcurrency, Detail: fmt.Sprintf("max parallel %d reached", req.MaxParallel)})
+			continue
+		}
 		result.Nodes = append(result.Nodes, node)
-		if len(result.Nodes) >= maxBatch {
+		batchSlots += nodeSlots
+		if nodeExclusive {
+			break
+		}
+		if maxBatch > 0 && len(result.Nodes) >= maxBatch {
 			break
 		}
 	}
@@ -154,21 +169,14 @@ func (req RunnableRequest) manualGateSet() map[string]ManualGateState {
 	return set
 }
 
-func (req RunnableRequest) batchLimit(queueLen int, runningCount int) int {
-	limit := req.BatchSize
-	if limit <= 0 || limit > queueLen {
-		limit = queueLen
+func (req RunnableRequest) batchNodeLimit(queueLen int) int {
+	if queueLen <= 0 {
+		return 0
 	}
-	if req.MaxParallel > 0 {
-		remaining := req.MaxParallel - runningCount
-		if remaining <= 0 {
-			return 0
-		}
-		if limit == 0 || limit > remaining {
-			limit = remaining
-		}
+	if req.BatchSize <= 0 || req.BatchSize > queueLen {
+		return queueLen
 	}
-	return limit
+	return req.BatchSize
 }
 
 func (b *RunnableBatch) addSkip(id string, reason SkipReason) {
@@ -205,4 +213,50 @@ func (q *runnableQueue) Pop() *resolver.Node {
 	node := q.nodes[0]
 	q.nodes = q.nodes[1:]
 	return node
+}
+
+type runningInventory struct {
+	slots       int
+	exclusiveID string
+}
+
+func (s *Scheduler) concurrencyInventory(running map[string]struct{}) runningInventory {
+	inv := runningInventory{}
+	if len(running) == 0 {
+		return inv
+	}
+	for id := range running {
+		node, _ := s.resolver.Node(id)
+		slots := nodeSlotCost(node)
+		inv.slots += slots
+		if inv.exclusiveID == "" && nodeRequiresExclusive(node) {
+			inv.exclusiveID = id
+		}
+	}
+	return inv
+}
+
+func nodeSlotCost(node *resolver.Node) int {
+	if node == nil {
+		return 1
+	}
+	return node.Module.Info().SlotCost()
+}
+
+func nodeRequiresExclusive(node *resolver.Node) bool {
+	if node == nil {
+		return false
+	}
+	return node.Module.Info().RequiresExclusiveExecution()
+}
+
+func (s *Scheduler) recordConcurrencySkip(batch *RunnableBatch, detail string) {
+	if batch == nil {
+		return
+	}
+	ready := s.resolver.Ready()
+	if len(ready) == 0 {
+		return
+	}
+	batch.addSkip(ready[0].ID, SkipReason{Reason: SkipReasonConcurrency, Detail: detail})
 }

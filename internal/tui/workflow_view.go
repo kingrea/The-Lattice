@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -55,6 +54,11 @@ type engineRefreshRequest struct{}
 type moduleRunFinishedMsg struct {
 	id     string
 	result module.Result
+	err    error
+}
+
+type workClaimMsg struct {
+	result engine.ClaimResult
 	err    error
 }
 
@@ -114,6 +118,21 @@ func (v *workflowView) Update(msg tea.Msg) tea.Cmd {
 		return tea.Batch(v.refreshEngineState(), v.scheduleRefresh())
 	case moduleRunFinishedMsg:
 		return v.handleModuleRunFinished(m)
+	case workClaimMsg:
+		if m.err != nil {
+			v.err = m.err
+			v.setStatus(fmt.Sprintf("Claim failed: %v", m.err))
+			return nil
+		}
+		v.err = nil
+		v.state = m.result.State
+		v.installDefinition(m.result.State.Definition)
+		v.installRuntimeState(m.result.State)
+		if len(m.result.Claims) == 0 {
+			v.setStatus("No runnable modules satisfied the request")
+			return nil
+		}
+		return v.launchClaims(m.result.Claims)
 	case tea.KeyMsg:
 		return v.handleKeyMsg(m)
 	default:
@@ -299,21 +318,51 @@ func (v *workflowView) runSelectedModule() tea.Cmd {
 		v.setStatus(fmt.Sprintf("%s is not ready", node.Name))
 		return nil
 	}
-	ref, ok := v.moduleRefs[node.ID]
-	if !ok {
-		v.setStatus(fmt.Sprintf("Module %s is undefined", node.ID))
+	return v.claimModules([]string{node.ID})
+}
+
+func (v *workflowView) claimModules(ids []string) tea.Cmd {
+	if v.engine == nil {
 		return nil
 	}
-	mod, err := v.registry.Resolve(ref.ModuleID, convertModuleConfig(ref.Config))
-	if err != nil {
-		v.setStatus(fmt.Sprintf("Resolve %s: %v", node.Name, err))
+	modules := cloneStrings(ids)
+	limit := len(modules)
+	if limit == 0 {
+		limit = 1
+	}
+	overrides := v.runtimeOverrides()
+	return func() tea.Msg {
+		result, err := v.engine.Claim(v.moduleCtx, engine.ClaimRequest{
+			Runtime: overrides,
+			Limit:   limit,
+			Modules: modules,
+		})
+		return workClaimMsg{result: result, err: err}
+	}
+}
+
+func (v *workflowView) launchClaims(claims []engine.WorkClaim) tea.Cmd {
+	if len(claims) == 0 {
 		return nil
 	}
-	if v.running == nil {
-		v.running = map[string]struct{}{}
+	cmds := make([]tea.Cmd, 0, len(claims))
+	for _, claim := range claims {
+		ref, ok := v.moduleRefs[claim.ID]
+		if !ok {
+			v.setStatus(fmt.Sprintf("Module %s is undefined", claim.ID))
+			continue
+		}
+		mod, err := v.registry.Resolve(ref.ModuleID, convertModuleConfig(ref.Config))
+		if err != nil {
+			v.setStatus(fmt.Sprintf("Resolve %s: %v", claim.Name, err))
+			continue
+		}
+		cmds = append(cmds, v.executeModule(claim.ID, mod))
 	}
-	v.running[node.ID] = struct{}{}
-	return tea.Batch(v.syncRuntime(), v.executeModule(node.ID, mod))
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 func (v *workflowView) executeModule(id string, mod module.Module) tea.Cmd {
@@ -342,9 +391,6 @@ func (v *workflowView) handleModuleRunFinished(msg moduleRunFinishedMsg) tea.Cmd
 			result.Status = module.StatusCompleted
 		}
 		update.Result = result
-	}
-	if result.Status != module.StatusNeedsInput {
-		delete(v.running, msg.id)
 	}
 	state, err := v.engine.Update(v.moduleCtx, engine.UpdateRequest{
 		Runtime: v.runtimeOverrides(),
@@ -507,14 +553,6 @@ func (v *workflowView) runtimeOverrides() *engine.RuntimeOverrides {
 	if len(v.targets) > 0 {
 		targets := cloneStrings(v.targets)
 		overrides.Targets = &targets
-	}
-	if v.running != nil {
-		running := make([]string, 0, len(v.running))
-		for id := range v.running {
-			running = append(running, id)
-		}
-		sort.Strings(running)
-		overrides.Running = &running
 	}
 	if len(v.manualGates) > 0 {
 		gates := cloneManualGates(v.manualGates)

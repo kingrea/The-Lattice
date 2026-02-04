@@ -31,12 +31,13 @@ func (g DependencyGraph) Clone() DependencyGraph {
 // WorkflowDefinition declares an executable workflow graph composed of modules
 // plus any metadata required to render it inside the TUI.
 type WorkflowDefinition struct {
-	ID          string            `json:"id" yaml:"id"`
-	Name        string            `json:"name" yaml:"name"`
-	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
-	Modules     []ModuleRef       `json:"modules" yaml:"modules"`
-	Graph       DependencyGraph   `json:"graph,omitempty" yaml:"graph,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	ID          string                `json:"id" yaml:"id"`
+	Name        string                `json:"name" yaml:"name"`
+	Description string                `json:"description,omitempty" yaml:"description,omitempty"`
+	Modules     []ModuleRef           `json:"modules" yaml:"modules"`
+	Graph       DependencyGraph       `json:"graph,omitempty" yaml:"graph,omitempty"`
+	Metadata    map[string]string     `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Runtime     WorkflowRuntimeConfig `json:"runtime,omitempty" yaml:"runtime,omitempty"`
 }
 
 // Clone returns a deep copy of the workflow definition.
@@ -47,6 +48,7 @@ func (def WorkflowDefinition) Clone() WorkflowDefinition {
 		Description: def.Description,
 		Metadata:    cloneStringMap(def.Metadata),
 		Graph:       def.Graph.Clone(),
+		Runtime:     def.Runtime,
 	}
 	if len(def.Modules) > 0 {
 		clone.Modules = make([]ModuleRef, len(def.Modules))
@@ -86,6 +88,9 @@ func (def WorkflowDefinition) Validate() error {
 			}
 		}
 	}
+	if err := def.Runtime.validate(); err != nil {
+		return fmt.Errorf("workflow %s runtime: %w", def.ID, err)
+	}
 	return nil
 }
 
@@ -100,10 +105,30 @@ func (def WorkflowDefinition) Normalized() (WorkflowDefinition, error) {
 		id := ref.InstanceID()
 		clone.Graph[id] = mergeDependencies(clone.Graph[id], ref.DependsOn)
 	}
+	clone.Runtime = clone.Runtime.normalized()
 	if err := clone.Validate(); err != nil {
 		return WorkflowDefinition{}, err
 	}
 	return clone, nil
+}
+
+// WorkflowRuntimeConfig configures execution constraints for a workflow.
+type WorkflowRuntimeConfig struct {
+	MaxParallel int `json:"max_parallel,omitempty" yaml:"max_parallel,omitempty"`
+}
+
+func (cfg WorkflowRuntimeConfig) normalized() WorkflowRuntimeConfig {
+	if cfg.MaxParallel < 0 {
+		cfg.MaxParallel = 0
+	}
+	return cfg
+}
+
+func (cfg WorkflowRuntimeConfig) validate() error {
+	if cfg.MaxParallel < 0 {
+		return fmt.Errorf("max_parallel must be >= 0")
+	}
+	return nil
 }
 
 // ModuleIDs returns the workflow-scoped identifiers in declaration order.

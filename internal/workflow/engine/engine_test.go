@@ -112,6 +112,87 @@ func TestEngineDetectsArtifactInvalidations(t *testing.T) {
 	}
 }
 
+func TestEngineClaimAndReleaseRespectsParallelism(t *testing.T) {
+	ctx := newTestModuleContext(t)
+	def := workflow.WorkflowDefinition{
+		ID:      "parallel-workflow",
+		Runtime: workflow.WorkflowRuntimeConfig{MaxParallel: 2},
+		Modules: []workflow.ModuleRef{
+			{ID: "anchor-plan", ModuleID: "plan"},
+			{ID: "module-build", ModuleID: "build", DependsOn: []string{"anchor-plan"}},
+			{ID: "module-docs", ModuleID: "docs", DependsOn: []string{"anchor-plan"}},
+		},
+	}
+	stubs := map[string]*stubModule{
+		"plan":  newStubModule("plan"),
+		"build": newStubModule("build"),
+		"docs":  newStubModule("docs"),
+	}
+	stubs["plan"].setComplete(true)
+	stubs["build"].setComplete(false)
+	stubs["docs"].setComplete(false)
+	eng, repo := newCustomEngine(t, ctx, def, stubs)
+	if _, err := eng.Start(ctx, StartRequest{Definition: def}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	maxParallel := 1
+	claim, err := eng.Claim(ctx, ClaimRequest{
+		Runtime: &RuntimeOverrides{MaxParallel: &maxParallel},
+		Limit:   2,
+	})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if len(claim.Claims) != 1 {
+		t.Fatalf("expected single claim due to parallel limit, got %d", len(claim.Claims))
+	}
+	if len(claim.State.Runtime.Running) != 1 {
+		t.Fatalf("expected runtime to track running module, got %+v", claim.State.Runtime.Running)
+	}
+	secondClaim, err := eng.Claim(ctx, ClaimRequest{Runtime: &RuntimeOverrides{MaxParallel: &maxParallel}, Limit: 1})
+	if err != nil {
+		t.Fatalf("claim while running: %v", err)
+	}
+	if len(secondClaim.Claims) != 0 {
+		t.Fatalf("expected no claims while capacity exhausted, got %+v", secondClaim.Claims)
+	}
+	firstID := claim.Claims[0].ID
+	if _, err := eng.Update(ctx, UpdateRequest{Results: []ModuleStatusUpdate{{
+		ID:     firstID,
+		Result: module.Result{Status: module.StatusCompleted},
+	}}}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	state, err := repo.Load()
+	if err != nil {
+		t.Fatalf("load repo: %v", err)
+	}
+	if len(state.Runtime.Running) != 0 {
+		t.Fatalf("expected running set cleared after completion, got %+v", state.Runtime.Running)
+	}
+	thirdClaim, err := eng.Claim(ctx, ClaimRequest{Limit: 1})
+	if err != nil {
+		t.Fatalf("claim remaining module: %v", err)
+	}
+	if len(thirdClaim.Claims) != 1 {
+		t.Fatalf("expected to claim remaining module, got %d", len(thirdClaim.Claims))
+	}
+	if _, err := eng.Update(ctx, UpdateRequest{Results: []ModuleStatusUpdate{{
+		ID:     thirdClaim.Claims[0].ID,
+		Result: module.Result{Status: module.StatusFailed},
+		Err:    errors.New("boom"),
+	}}}); err != nil {
+		t.Fatalf("update failure: %v", err)
+	}
+	state, err = repo.Load()
+	if err != nil {
+		t.Fatalf("load repo: %v", err)
+	}
+	if len(state.Runtime.Running) != 0 {
+		t.Fatalf("expected running set empty after failure, got %+v", state.Runtime.Running)
+	}
+}
+
 func findModule(state State, id string) ModuleStatus {
 	for _, mod := range state.Nodes {
 		if mod.ID == id {
@@ -151,6 +232,24 @@ func newEngineHarness(t *testing.T) (*Engine, *Repository, *module.ModuleContext
 		},
 	}
 	return eng, repo, ctx, stubs, def
+}
+
+func newCustomEngine(t *testing.T, ctx *module.ModuleContext, def workflow.WorkflowDefinition, stubs map[string]*stubModule) (*Engine, *Repository) {
+	reg := module.NewRegistry()
+	for id, stub := range stubs {
+		stub := stub
+		id := id
+		reg.MustRegister(id, func(module.Config) (module.Module, error) {
+			return stub, nil
+		})
+	}
+	repo := NewRepository(ctx.Workflow)
+	clock := &testClock{value: time.Unix(0, 0)}
+	eng, err := New(reg, repo, WithClock(clock.Now))
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	return eng, repo
 }
 
 type testClock struct {

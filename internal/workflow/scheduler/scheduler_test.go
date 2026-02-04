@@ -165,6 +165,81 @@ func TestSchedulerEnforcesParallelLimit(t *testing.T) {
 	}
 }
 
+func TestSchedulerRespectsModuleSlotCost(t *testing.T) {
+	stubs := map[string]*stubModule{
+		"plan":  newStubModule("plan", true, nil),
+		"build": newStubModule("build", false, nil),
+		"docs":  newStubModule("docs", false, nil),
+	}
+	// Build consumes two slots while docs consumes one.
+	stubs["build"].info.Concurrency = module.ConcurrencyProfile{Slots: 2}
+	def := workflow.WorkflowDefinition{
+		ID: "test",
+		Modules: []workflow.ModuleRef{
+			{ID: "anchor-plan", ModuleID: "plan"},
+			{ID: "module-build", ModuleID: "build", DependsOn: []string{"anchor-plan"}},
+			{ID: "module-docs", ModuleID: "docs", DependsOn: []string{"anchor-plan"}},
+		},
+	}
+	sched := buildScheduler(t, stubs, def)
+	batch, err := sched.Runnable(RunnableRequest{BatchSize: 2, MaxParallel: 2})
+	if err != nil {
+		t.Fatalf("runnable: %v", err)
+	}
+	if len(batch.Nodes) != 1 || batch.Nodes[0].ID != "module-build" {
+		t.Fatalf("expected build to consume full capacity, got %+v", batch.Nodes)
+	}
+	batch, err = sched.Runnable(RunnableRequest{BatchSize: 2, MaxParallel: 3})
+	if err != nil {
+		t.Fatalf("runnable: %v", err)
+	}
+	if len(batch.Nodes) != 2 {
+		t.Fatalf("expected both modules runnable with extra slot, got %d", len(batch.Nodes))
+	}
+}
+
+func TestSchedulerEnforcesExclusiveModules(t *testing.T) {
+	stubs := map[string]*stubModule{
+		"plan":   newStubModule("plan", true, nil),
+		"deploy": newStubModule("deploy", false, nil),
+		"docs":   newStubModule("docs", false, nil),
+	}
+	stubs["deploy"].info.Concurrency = module.ConcurrencyProfile{Exclusive: true}
+	def := workflow.WorkflowDefinition{
+		ID: "test",
+		Modules: []workflow.ModuleRef{
+			{ID: "anchor-plan", ModuleID: "plan"},
+			{ID: "module-deploy", ModuleID: "deploy", DependsOn: []string{"anchor-plan"}},
+			{ID: "module-docs", ModuleID: "docs", DependsOn: []string{"anchor-plan"}},
+		},
+	}
+	sched := buildScheduler(t, stubs, def)
+	batch, err := sched.Runnable(RunnableRequest{BatchSize: 2, MaxParallel: 3})
+	if err != nil {
+		t.Fatalf("runnable: %v", err)
+	}
+	if len(batch.Nodes) != 1 || batch.Nodes[0].ID != "module-deploy" {
+		t.Fatalf("expected deploy to run alone, got %+v", batch.Nodes)
+	}
+	batch, err = sched.Runnable(RunnableRequest{MaxParallel: 3, Running: []string{"module-deploy"}})
+	if err != nil {
+		t.Fatalf("runnable: %v", err)
+	}
+	if len(batch.Nodes) != 0 {
+		t.Fatalf("expected no runnable nodes while exclusive module active")
+	}
+	foundConcurrencySkip := false
+	for _, reason := range batch.Skipped {
+		if reason.Reason == SkipReasonConcurrency {
+			foundConcurrencySkip = true
+			break
+		}
+	}
+	if !foundConcurrencySkip {
+		t.Fatalf("expected concurrency skip while exclusive module active, got %+v", batch.Skipped)
+	}
+}
+
 func buildScheduler(t *testing.T, stubs map[string]*stubModule, def workflow.WorkflowDefinition) *Scheduler {
 	t.Helper()
 	res, ctx := buildResolverForTest(t, stubs, def)

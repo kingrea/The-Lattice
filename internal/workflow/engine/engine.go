@@ -132,6 +132,7 @@ func (e *Engine) Update(ctx *module.ModuleContext, req UpdateRequest) (State, er
 	}
 	updatedRuns := mergeRuns(current.Runs, req.Results, e.now)
 	runtime := applyRuntimeOverrides(current.Runtime, req.Runtime)
+	runtime.Running = releaseRunning(runtime.Running, req.Results)
 	state, err := e.buildState(ctx, current.Definition, runtime, updatedRuns)
 	if err != nil {
 		return State{}, err
@@ -151,6 +152,7 @@ func (e *Engine) View() (State, error) {
 }
 
 func (e *Engine) buildState(ctx *module.ModuleContext, def workflow.WorkflowDefinition, runtime EngineRuntime, runs map[string]ModuleRun) (State, error) {
+	runtime = applyWorkflowRuntime(def, runtime)
 	res, err := resolver.New(def, e.registry)
 	if err != nil {
 		return State{}, err
@@ -194,6 +196,7 @@ func summarizeNodes(res *resolver.Resolver, runs map[string]ModuleRun) []ModuleS
 			Name:         pickName(ref, info),
 			Description:  ref.Description,
 			Optional:     ref.Optional,
+			Concurrency:  info.Concurrency,
 			State:        node.State,
 			Dependencies: cloneStrings(node.Dependencies),
 			Dependents:   cloneStrings(node.Dependents),

@@ -61,6 +61,7 @@ type ModuleStatus struct {
 	Name         string                    `json:"name"`
 	Description  string                    `json:"description,omitempty"`
 	Optional     bool                      `json:"optional,omitempty"`
+	Concurrency  module.ConcurrencyProfile `json:"concurrency"`
 	State        resolver.NodeState        `json:"state"`
 	Dependencies []string                  `json:"dependencies,omitempty"`
 	Dependents   []string                  `json:"dependents,omitempty"`

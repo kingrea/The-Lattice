@@ -2,6 +2,8 @@ id: commission-work
 name: Commission Work
 description:
   Default workflow that drives planning artifacts through module engine
+runtime:
+  max_parallel: 3
 
 modules:
   - id: anchor-docs

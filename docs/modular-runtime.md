@@ -97,6 +97,9 @@ nodes were withheld (manual gate, concurrency cap, not-ready state). This lets
 Bubble Tea modes and the upcoming engine request work in a loop without knowing
 about artifact invalidation details.
 
+For the full concurrency strategy (slot accounting, exclusive modules, and
+worker claim APIs) see `docs/parallel-execution.md`.
+
 This explicit split lets us evolve the runtime incrementally: we can convert one
 mode at a time to modules without blocking the rest of the CLI.
 
