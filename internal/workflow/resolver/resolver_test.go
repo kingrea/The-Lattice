@@ -101,6 +101,87 @@ func TestResolverRefreshPropagatesErrors(t *testing.T) {
 	}
 }
 
+func TestResolverCheckArtifactFingerprintFresh(t *testing.T) {
+	stubs := map[string]*stubModule{
+		"plan":   newStubModule("plan", true, nil),
+		"build":  newStubModule("build", false, nil),
+		"deploy": newStubModule("deploy", false, nil),
+	}
+	fingerprint := "abc123"
+	stubs["plan"].outputs = []artifact.ArtifactRef{artifact.ModulesDoc}
+	stubs["plan"].fingerprints = map[string]string{artifact.ModulesDoc.ID: fingerprint}
+	res := buildResolver(t, stubs)
+	ctx := newTestModuleContext(t)
+	meta := artifact.Metadata{
+		ArtifactID: artifact.ModulesDoc.ID,
+		ModuleID:   stubs["plan"].info.ID,
+		Version:    stubs["plan"].info.Version,
+		Workflow:   ctx.Workflow.Dir(),
+		Notes: map[string]string{
+			module.FingerprintNoteKey(artifact.ModulesDoc.ID): fingerprint,
+		},
+	}
+	if err := ctx.Artifacts.Write(artifact.ModulesDoc, []byte("body"), meta); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	if err := res.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	plan := mustNode(t, res, "anchor-plan")
+	report, ok := plan.Artifacts[artifact.ModulesDoc.ID]
+	if !ok {
+		t.Fatalf("missing artifact report")
+	}
+	if report.Status != module.ArtifactStatusFresh {
+		t.Fatalf("expected fresh artifact, got %s", report.Status)
+	}
+	if plan.State != NodeStateComplete {
+		t.Fatalf("expected plan complete, got %s", plan.State)
+	}
+}
+
+func TestResolverCheckArtifactFingerprintMismatch(t *testing.T) {
+	stubs := map[string]*stubModule{
+		"plan":   newStubModule("plan", true, nil),
+		"build":  newStubModule("build", false, nil),
+		"deploy": newStubModule("deploy", false, nil),
+	}
+	stubs["plan"].outputs = []artifact.ArtifactRef{artifact.ModulesDoc}
+	stubs["plan"].fingerprints = map[string]string{artifact.ModulesDoc.ID: "new"}
+	res := buildResolver(t, stubs)
+	ctx := newTestModuleContext(t)
+	meta := artifact.Metadata{
+		ArtifactID: artifact.ModulesDoc.ID,
+		ModuleID:   stubs["plan"].info.ID,
+		Version:    stubs["plan"].info.Version,
+		Workflow:   ctx.Workflow.Dir(),
+		Notes: map[string]string{
+			module.FingerprintNoteKey(artifact.ModulesDoc.ID): "old",
+		},
+	}
+	if err := ctx.Artifacts.Write(artifact.ModulesDoc, []byte("body"), meta); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	if err := res.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	plan := mustNode(t, res, "anchor-plan")
+	report := plan.Artifacts[artifact.ModulesDoc.ID]
+	if report.Status != module.ArtifactStatusOutdated {
+		t.Fatalf("expected outdated, got %s", report.Status)
+	}
+	if plan.State == NodeStateComplete {
+		t.Fatalf("expected plan to be rerun due to invalid artifact")
+	}
+	if len(stubs["plan"].invalidations) != 1 {
+		t.Fatalf("expected invalidation event")
+	}
+	event := stubs["plan"].invalidations[0]
+	if event.Reason != module.InvalidationReasonFingerprint {
+		t.Fatalf("unexpected invalidation reason: %s", event.Reason)
+	}
+}
+
 func buildResolver(t *testing.T, stubs map[string]*stubModule) *Resolver {
 	t.Helper()
 	reg := module.NewRegistry()
@@ -148,9 +229,12 @@ func mustNode(t *testing.T, resolver *Resolver, id string) *Node {
 }
 
 type stubModule struct {
-	info     module.Info
-	complete bool
-	err      error
+	info          module.Info
+	complete      bool
+	err           error
+	outputs       []artifact.ArtifactRef
+	fingerprints  map[string]string
+	invalidations []module.ArtifactInvalidation
 }
 
 func newStubModule(id string, complete bool, err error) *stubModule {
@@ -174,7 +258,12 @@ func (m *stubModule) Inputs() []artifact.ArtifactRef {
 }
 
 func (m *stubModule) Outputs() []artifact.ArtifactRef {
-	return nil
+	if len(m.outputs) == 0 {
+		return nil
+	}
+	out := make([]artifact.ArtifactRef, len(m.outputs))
+	copy(out, m.outputs)
+	return out
 }
 
 func (m *stubModule) IsComplete(*module.ModuleContext) (bool, error) {
@@ -186,4 +275,20 @@ func (m *stubModule) IsComplete(*module.ModuleContext) (bool, error) {
 
 func (m *stubModule) Run(*module.ModuleContext) (module.Result, error) {
 	return module.Result{Status: module.StatusCompleted}, nil
+}
+
+func (m *stubModule) ArtifactFingerprints(*module.ModuleContext) (map[string]string, error) {
+	if len(m.fingerprints) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(m.fingerprints))
+	for key, value := range m.fingerprints {
+		out[key] = value
+	}
+	return out, nil
+}
+
+func (m *stubModule) OnArtifactInvalidation(_ *module.ModuleContext, event module.ArtifactInvalidation) error {
+	m.invalidations = append(m.invalidations, event)
+	return nil
 }

@@ -3,7 +3,9 @@ package resolver
 import (
 	"fmt"
 	"sort"
+	"strings"
 
+	"github.com/yourusername/lattice/internal/artifact"
 	"github.com/yourusername/lattice/internal/module"
 	"github.com/yourusername/lattice/internal/workflow"
 )
@@ -31,6 +33,19 @@ type Node struct {
 	State     NodeState
 	BlockedBy []string
 	Err       error
+
+	Artifacts    map[string]ArtifactReport
+	fingerprints map[string]string
+}
+
+// ArtifactReport captures the resolver's understanding of an output artifact.
+type ArtifactReport struct {
+	Ref                 artifact.ArtifactRef
+	Status              module.ArtifactStatus
+	Metadata            *artifact.Metadata
+	Err                 error
+	StoredFingerprint   string
+	ExpectedFingerprint string
 }
 
 // Resolver builds and evaluates the workflow dependency graph.
@@ -120,7 +135,20 @@ func (r *Resolver) Refresh(ctx *module.ModuleContext) error {
 	for _, node := range r.nodes {
 		node.Err = nil
 		node.BlockedBy = nil
+		node.Artifacts = nil
+		node.fingerprints = nil
 		node.State = NodeStateUnknown
+		if fpProvider, ok := node.Module.(module.Fingerprinter); ok {
+			fingerprints, err := fpProvider.ArtifactFingerprints(ctx)
+			if err != nil {
+				node.State = NodeStateError
+				node.Err = fmt.Errorf("workflow: fingerprints for %s: %w", node.ID, err)
+				continue
+			}
+			if len(fingerprints) > 0 {
+				node.fingerprints = fingerprints
+			}
+		}
 		complete, err := node.Module.IsComplete(ctx)
 		if err != nil {
 			node.State = NodeStateError
@@ -130,6 +158,15 @@ func (r *Resolver) Refresh(ctx *module.ModuleContext) error {
 		if complete {
 			node.State = NodeStateComplete
 		} else {
+			node.State = NodeStatePending
+		}
+	}
+	for _, node := range r.nodes {
+		if node.State == NodeStateError {
+			continue
+		}
+		r.refreshArtifacts(ctx, node)
+		if node.State == NodeStateComplete && node.hasArtifactIssues() {
 			node.State = NodeStatePending
 		}
 	}
@@ -213,6 +250,172 @@ func (r *Resolver) blockers(node *Node) []string {
 		return nil
 	}
 	return blockers
+}
+
+func (r *Resolver) refreshArtifacts(ctx *module.ModuleContext, node *Node) {
+	outputs := node.Module.Outputs()
+	if len(outputs) == 0 {
+		node.Artifacts = nil
+		return
+	}
+	if node.Artifacts == nil {
+		node.Artifacts = make(map[string]ArtifactReport, len(outputs))
+	} else {
+		for key := range node.Artifacts {
+			delete(node.Artifacts, key)
+		}
+	}
+	for _, ref := range outputs {
+		report := r.CheckArtifact(ctx, node, ref)
+		node.Artifacts[ref.ID] = report
+	}
+}
+
+func (n *Node) hasArtifactIssues() bool {
+	if len(n.Artifacts) == 0 {
+		return false
+	}
+	for _, report := range n.Artifacts {
+		switch report.Status {
+		case module.ArtifactStatusFresh, module.ArtifactStatusReady:
+			continue
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// CheckArtifact evaluates a single artifact and returns its resolver status.
+func (r *Resolver) CheckArtifact(ctx *module.ModuleContext, node *Node, ref artifact.ArtifactRef) ArtifactReport {
+	report := ArtifactReport{Ref: ref, Status: module.ArtifactStatusUnknown}
+	if ctx == nil || ctx.Artifacts == nil {
+		report.Status = module.ArtifactStatusError
+		report.Err = fmt.Errorf("workflow: artifact store unavailable")
+		r.emitInvalidation(ctx, node, report, module.InvalidationReasonCheckError)
+		return report
+	}
+	result, err := ctx.Artifacts.Check(ref)
+	report.Metadata = result.Metadata
+	if err != nil {
+		report.Err = err
+	}
+	switch result.State {
+	case artifact.StateMissing:
+		report.Status = module.ArtifactStatusMissing
+		r.emitInvalidation(ctx, node, report, module.InvalidationReasonMissing)
+	case artifact.StateInvalid:
+		if report.Err == nil {
+			report.Err = result.Err
+		}
+		report.Status = module.ArtifactStatusInvalid
+		r.emitInvalidation(ctx, node, report, module.InvalidationReasonInvalidMetadata)
+	case artifact.StateError:
+		if report.Err == nil {
+			report.Err = result.Err
+		}
+		if report.Err == nil {
+			report.Err = fmt.Errorf("workflow: %s encountered an unknown error", ref.ID)
+		}
+		report.Status = module.ArtifactStatusError
+		r.emitInvalidation(ctx, node, report, module.InvalidationReasonCheckError)
+	case artifact.StateReady:
+		info := node.Module.Info()
+		meta := result.Metadata
+		if meta == nil {
+			report.Status = module.ArtifactStatusInvalid
+			report.Err = fmt.Errorf("workflow: %s missing metadata", ref.ID)
+			r.emitInvalidation(ctx, node, report, module.InvalidationReasonInvalidMetadata)
+			break
+		}
+		if meta.ModuleID != info.ID {
+			report.Status = module.ArtifactStatusInvalid
+			report.Err = fmt.Errorf("workflow: %s created by %s expected %s", ref.ID, meta.ModuleID, info.ID)
+			r.emitInvalidation(ctx, node, report, module.InvalidationReasonInvalidMetadata)
+			break
+		}
+		if meta.Version != info.Version {
+			report.Status = module.ArtifactStatusOutdated
+			r.emitInvalidation(ctx, node, report, module.InvalidationReasonVersionMismatch)
+			break
+		}
+		expected, hasExpected, fpErr := r.expectedFingerprint(ctx, node, ref)
+		if fpErr != nil {
+			report.Status = module.ArtifactStatusError
+			report.Err = fpErr
+			r.emitInvalidation(ctx, node, report, module.InvalidationReasonCheckError)
+			break
+		}
+		if !hasExpected {
+			report.Status = module.ArtifactStatusReady
+			break
+		}
+		stored := fingerprintFromMetadata(meta, ref.ID)
+		report.ExpectedFingerprint = expected
+		report.StoredFingerprint = stored
+		if strings.TrimSpace(stored) == "" {
+			report.Status = module.ArtifactStatusReady
+			break
+		}
+		if stored != expected {
+			report.Status = module.ArtifactStatusOutdated
+			r.emitInvalidation(ctx, node, report, module.InvalidationReasonFingerprint)
+			break
+		}
+		report.Status = module.ArtifactStatusFresh
+	default:
+		report.Status = module.ArtifactStatusUnknown
+	}
+	return report
+}
+
+func (r *Resolver) expectedFingerprint(ctx *module.ModuleContext, node *Node, ref artifact.ArtifactRef) (string, bool, error) {
+	if node == nil {
+		return "", false, nil
+	}
+	if node.fingerprints == nil {
+		provider, ok := node.Module.(module.Fingerprinter)
+		if !ok {
+			return "", false, nil
+		}
+		fingerprints, err := provider.ArtifactFingerprints(ctx)
+		if err != nil {
+			return "", false, err
+		}
+		node.fingerprints = fingerprints
+	}
+	value, ok := node.fingerprints[ref.ID]
+	if !ok || strings.TrimSpace(value) == "" {
+		return "", false, nil
+	}
+	return value, true, nil
+}
+
+func fingerprintFromMetadata(meta *artifact.Metadata, artifactID string) string {
+	if meta == nil || len(meta.Notes) == 0 {
+		return ""
+	}
+	return meta.Notes[module.FingerprintNoteKey(artifactID)]
+}
+
+func (r *Resolver) emitInvalidation(ctx *module.ModuleContext, node *Node, report ArtifactReport, reason module.ArtifactInvalidationReason) {
+	handler, ok := node.Module.(module.ArtifactInvalidationHandler)
+	if !ok {
+		return
+	}
+	event := module.ArtifactInvalidation{
+		Artifact:            report.Ref,
+		Status:              report.Status,
+		Reason:              reason,
+		StoredFingerprint:   report.StoredFingerprint,
+		ExpectedFingerprint: report.ExpectedFingerprint,
+		Metadata:            report.Metadata,
+		Err:                 report.Err,
+	}
+	if err := handler.OnArtifactInvalidation(ctx, event); err != nil {
+		node.State = NodeStateError
+		node.Err = err
+	}
 }
 
 func convertConfig(cfg workflow.ModuleConfig) module.Config {

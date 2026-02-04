@@ -118,3 +118,17 @@ change. The policy is straightforward:
    it writes receives the updated provenance, ensuring downstream modules notice
 3. When a `checksum` is provided, `Check` compares it to the current body to
    guard against manual edits outside the runtime
+
+### Artifact fingerprints + invalidation hooks
+
+- Modules that implement `module.Fingerprinter` can return a map of artifact IDs
+  to fingerprint strings (hash of inputs, config digest, etc.).
+- When a module writes an artifact it can persist the fingerprint inside the
+  metadata by calling `runtime.WithFingerprint(ref, value)`.
+- `Resolver.CheckArtifact` automatically compares the stored fingerprint (notes
+  entry `fingerprint:<artifact-id>`) to the module's current value.
+- Matching fingerprints mark the artifact as `fresh`; mismatches emit
+  `module.ArtifactInvalidation` events via `module.ArtifactInvalidationHandler`.
+- Invalidation reasons include missing files, malformed metadata, module version
+  drift, or fingerprint mismatches. Modules can react to these events to clean
+  up derived artifacts or schedule dependent work.

@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/yourusername/lattice/internal/artifact"
 	"github.com/yourusername/lattice/internal/module"
@@ -26,6 +27,19 @@ func WithInputs(refs ...artifact.ArtifactRef) MetadataOption {
 		if len(ids) > 0 {
 			meta.Inputs = ids
 		}
+	}
+}
+
+// WithFingerprint records a fingerprint value for the provided artifact.
+func WithFingerprint(ref artifact.ArtifactRef, value string) MetadataOption {
+	return func(meta *artifact.Metadata) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
+		if meta.Notes == nil {
+			meta.Notes = map[string]string{}
+		}
+		meta.Notes[module.FingerprintNoteKey(ref.ID)] = value
 	}
 }
 
