@@ -2,13 +2,13 @@ package consolidation
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/yourusername/lattice/internal/artifact"
 	"github.com/yourusername/lattice/internal/module"
+	"github.com/yourusername/lattice/internal/modules/runtime"
 )
 
 const (
@@ -64,7 +64,7 @@ func New() *ConsolidationModule {
 
 // Run validates prerequisites and launches the tmux session when needed.
 func (m *ConsolidationModule) Run(ctx *module.ModuleContext) (module.Result, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return module.Result{Status: module.StatusFailed}, err
 	}
 	if missing, err := m.missingInput(ctx); err != nil {
@@ -115,10 +115,10 @@ func (m *ConsolidationModule) Run(ctx *module.ModuleContext) (module.Result, err
 
 // IsComplete returns true when the marker exists and plan docs were stamped.
 func (m *ConsolidationModule) IsComplete(ctx *module.ModuleContext) (bool, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return false, err
 	}
-	markerReady, err := m.markerReady(ctx)
+	markerReady, err := runtime.EnsureMarker(ctx, moduleID, moduleVersion, artifact.ReviewsAppliedMarker)
 	if err != nil {
 		return false, err
 	}
@@ -126,14 +126,9 @@ func (m *ConsolidationModule) IsComplete(ctx *module.ModuleContext) (bool, error
 		m.stopSession()
 		return true, nil
 	}
-	for _, ref := range []artifact.ArtifactRef{artifact.ModulesDoc, artifact.ActionPlanDoc} {
-		ready, err := m.ensureDocument(ctx, ref)
-		if err != nil {
-			return false, err
-		}
-		if !ready {
-			return false, nil
-		}
+	ready, err := runtime.EnsureDocuments(ctx, moduleID, moduleVersion, []artifact.ArtifactRef{artifact.ModulesDoc, artifact.ActionPlanDoc}, runtime.WithInputs(m.Inputs()...))
+	if err != nil || !ready {
+		return false, err
 	}
 	return false, nil
 }
@@ -151,131 +146,12 @@ func (m *ConsolidationModule) missingInput(ctx *module.ModuleContext) (string, e
 	return "", nil
 }
 
-func (m *ConsolidationModule) ensureDocument(ctx *module.ModuleContext, ref artifact.ArtifactRef) (bool, error) {
-	result, err := ctx.Artifacts.Check(ref)
-	if err != nil {
-		return false, fmt.Errorf("consolidation: check %s: %w", ref.ID, err)
-	}
-	switch result.State {
-	case artifact.StateReady:
-		if result.Metadata == nil || result.Metadata.ModuleID != moduleID || result.Metadata.Version != moduleVersion {
-			if err := m.writeMetadata(ctx, ref); err != nil {
-				return false, err
-			}
-			return false, nil
-		}
-		return true, nil
-	case artifact.StateMissing:
-		return false, nil
-	case artifact.StateInvalid:
-		if err := m.writeMetadata(ctx, ref); err != nil {
-			return false, err
-		}
-		return false, nil
-	case artifact.StateError:
-		if result.Err != nil {
-			return false, fmt.Errorf("consolidation: %s: %w", ref.ID, result.Err)
-		}
-		return false, fmt.Errorf("consolidation: %s encountered an unknown error", ref.ID)
-	default:
-		return false, nil
-	}
-}
-
-func (m *ConsolidationModule) writeMetadata(ctx *module.ModuleContext, ref artifact.ArtifactRef) error {
-	path := ref.Path(ctx.Workflow)
-	if path == "" {
-		return fmt.Errorf("consolidation: unable to resolve path for %s", ref.ID)
-	}
-	body, err := readDocumentBody(path)
-	if err != nil {
-		return fmt.Errorf("consolidation: read %s: %w", ref.ID, err)
-	}
-	meta := artifact.Metadata{
-		ArtifactID: ref.ID,
-		ModuleID:   moduleID,
-		Version:    moduleVersion,
-		Workflow:   ctx.Workflow.Dir(),
-		Inputs: []string{
-			artifact.CommissionDoc.ID,
-			artifact.ArchitectureDoc.ID,
-			artifact.ConventionsDoc.ID,
-			artifact.ModulesDoc.ID,
-			artifact.ActionPlanDoc.ID,
-			artifact.StaffReviewDoc.ID,
-			artifact.ReviewPragmatistDoc.ID,
-			artifact.ReviewSimplifierDoc.ID,
-			artifact.ReviewAdvocateDoc.ID,
-			artifact.ReviewSkepticDoc.ID,
-		},
-	}
-	if err := ctx.Artifacts.Write(ref, body, meta); err != nil {
-		return fmt.Errorf("consolidation: write %s: %w", ref.ID, err)
-	}
-	return nil
-}
-
-func (m *ConsolidationModule) markerReady(ctx *module.ModuleContext) (bool, error) {
-	result, err := ctx.Artifacts.Check(artifact.ReviewsAppliedMarker)
-	if err != nil {
-		return false, fmt.Errorf("consolidation: check marker: %w", err)
-	}
-	switch result.State {
-	case artifact.StateReady:
-		return true, nil
-	case artifact.StateMissing:
-		return false, nil
-	case artifact.StateInvalid:
-		if err := ctx.Artifacts.Write(artifact.ReviewsAppliedMarker, nil, artifact.Metadata{ArtifactID: artifact.ReviewsAppliedMarker.ID, ModuleID: moduleID, Version: moduleVersion, Workflow: ctx.Workflow.Dir()}); err != nil {
-			return false, fmt.Errorf("consolidation: rewrite marker: %w", err)
-		}
-		return false, nil
-	case artifact.StateError:
-		if result.Err != nil {
-			return false, fmt.Errorf("consolidation: marker error: %w", result.Err)
-		}
-		return false, fmt.Errorf("consolidation: marker encountered unknown error")
-	default:
-		return false, nil
-	}
-}
-
 func (m *ConsolidationModule) stopSession() {
 	if m.windowName == "" {
 		return
 	}
 	killTmuxWindow(m.windowName)
 	m.windowName = ""
-}
-
-func validateContext(ctx *module.ModuleContext) error {
-	if ctx == nil {
-		return fmt.Errorf("consolidation: context is nil")
-	}
-	if ctx.Config == nil {
-		return fmt.Errorf("consolidation: config is required")
-	}
-	if ctx.Workflow == nil {
-		return fmt.Errorf("consolidation: workflow is required")
-	}
-	if ctx.Artifacts == nil {
-		return fmt.Errorf("consolidation: artifact store is required")
-	}
-	return nil
-}
-
-func readDocumentBody(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	if _, body, err := artifact.ParseFrontMatter(data); err == nil {
-		return body, nil
-	}
-	return data, nil
 }
 
 func createTmuxWindow(name, dir string) error {

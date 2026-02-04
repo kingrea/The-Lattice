@@ -2,13 +2,13 @@ package staff_incorporate
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/yourusername/lattice/internal/artifact"
 	"github.com/yourusername/lattice/internal/module"
+	"github.com/yourusername/lattice/internal/modules/runtime"
 )
 
 const (
@@ -60,7 +60,7 @@ func New() *StaffIncorporateModule {
 
 // Run validates prerequisites and launches the tmux session if needed.
 func (m *StaffIncorporateModule) Run(ctx *module.ModuleContext) (module.Result, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return module.Result{Status: module.StatusFailed}, err
 	}
 	if missing, err := m.missingInput(ctx); err != nil {
@@ -102,10 +102,10 @@ func (m *StaffIncorporateModule) Run(ctx *module.ModuleContext) (module.Result, 
 
 // IsComplete checks whether MODULES/PLAN plus the marker are in place.
 func (m *StaffIncorporateModule) IsComplete(ctx *module.ModuleContext) (bool, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return false, err
 	}
-	markerReady, err := m.markerReady(ctx)
+	markerReady, err := runtime.EnsureMarker(ctx, moduleID, moduleVersion, artifact.StaffFeedbackApplied)
 	if err != nil {
 		return false, err
 	}
@@ -113,14 +113,9 @@ func (m *StaffIncorporateModule) IsComplete(ctx *module.ModuleContext) (bool, er
 		m.stopSession()
 		return true, nil
 	}
-	for _, ref := range []artifact.ArtifactRef{artifact.ModulesDoc, artifact.ActionPlanDoc} {
-		ready, err := m.ensureDocument(ctx, ref)
-		if err != nil {
-			return false, err
-		}
-		if !ready {
-			return false, nil
-		}
+	ready, err := runtime.EnsureDocuments(ctx, moduleID, moduleVersion, []artifact.ArtifactRef{artifact.ModulesDoc, artifact.ActionPlanDoc}, runtime.WithInputs(m.Inputs()...))
+	if err != nil || !ready {
+		return false, err
 	}
 	return false, nil
 }
@@ -138,127 +133,12 @@ func (m *StaffIncorporateModule) missingInput(ctx *module.ModuleContext) (string
 	return "", nil
 }
 
-func (m *StaffIncorporateModule) ensureDocument(ctx *module.ModuleContext, ref artifact.ArtifactRef) (bool, error) {
-	result, err := ctx.Artifacts.Check(ref)
-	if err != nil {
-		return false, fmt.Errorf("staff-incorporate: check %s: %w", ref.ID, err)
-	}
-	switch result.State {
-	case artifact.StateReady:
-		if result.Metadata == nil || result.Metadata.ModuleID != moduleID || result.Metadata.Version != moduleVersion {
-			if err := m.writeMetadata(ctx, ref); err != nil {
-				return false, err
-			}
-			return false, nil
-		}
-		return true, nil
-	case artifact.StateMissing:
-		return false, nil
-	case artifact.StateInvalid:
-		if err := m.writeMetadata(ctx, ref); err != nil {
-			return false, err
-		}
-		return false, nil
-	case artifact.StateError:
-		if result.Err != nil {
-			return false, fmt.Errorf("staff-incorporate: %s: %w", ref.ID, result.Err)
-		}
-		return false, fmt.Errorf("staff-incorporate: %s encountered an unknown error", ref.ID)
-	default:
-		return false, nil
-	}
-}
-
-func (m *StaffIncorporateModule) writeMetadata(ctx *module.ModuleContext, ref artifact.ArtifactRef) error {
-	path := ref.Path(ctx.Workflow)
-	if path == "" {
-		return fmt.Errorf("staff-incorporate: unable to resolve path for %s", ref.ID)
-	}
-	body, err := readDocumentBody(path)
-	if err != nil {
-		return fmt.Errorf("staff-incorporate: read %s: %w", ref.ID, err)
-	}
-	meta := artifact.Metadata{
-		ArtifactID: ref.ID,
-		ModuleID:   moduleID,
-		Version:    moduleVersion,
-		Workflow:   ctx.Workflow.Dir(),
-		Inputs: []string{
-			artifact.StaffReviewDoc.ID,
-			artifact.ModulesDoc.ID,
-			artifact.ActionPlanDoc.ID,
-			artifact.CommissionDoc.ID,
-			artifact.ArchitectureDoc.ID,
-			artifact.ConventionsDoc.ID,
-		},
-	}
-	if err := ctx.Artifacts.Write(ref, body, meta); err != nil {
-		return fmt.Errorf("staff-incorporate: write %s: %w", ref.ID, err)
-	}
-	return nil
-}
-
-func (m *StaffIncorporateModule) markerReady(ctx *module.ModuleContext) (bool, error) {
-	result, err := ctx.Artifacts.Check(artifact.StaffFeedbackApplied)
-	if err != nil {
-		return false, fmt.Errorf("staff-incorporate: check marker: %w", err)
-	}
-	switch result.State {
-	case artifact.StateReady:
-		return true, nil
-	case artifact.StateMissing:
-		return false, nil
-	case artifact.StateInvalid:
-		if err := ctx.Artifacts.Write(artifact.StaffFeedbackApplied, nil, artifact.Metadata{ArtifactID: artifact.StaffFeedbackApplied.ID, ModuleID: moduleID, Version: moduleVersion, Workflow: ctx.Workflow.Dir()}); err != nil {
-			return false, fmt.Errorf("staff-incorporate: rewrite marker: %w", err)
-		}
-		return false, nil
-	case artifact.StateError:
-		if result.Err != nil {
-			return false, fmt.Errorf("staff-incorporate: marker error: %w", result.Err)
-		}
-		return false, fmt.Errorf("staff-incorporate: marker encountered unknown error")
-	default:
-		return false, nil
-	}
-}
-
 func (m *StaffIncorporateModule) stopSession() {
 	if m.windowName == "" {
 		return
 	}
 	killTmuxWindow(m.windowName)
 	m.windowName = ""
-}
-
-func validateContext(ctx *module.ModuleContext) error {
-	if ctx == nil {
-		return fmt.Errorf("staff-incorporate: context is nil")
-	}
-	if ctx.Config == nil {
-		return fmt.Errorf("staff-incorporate: config is required")
-	}
-	if ctx.Workflow == nil {
-		return fmt.Errorf("staff-incorporate: workflow is required")
-	}
-	if ctx.Artifacts == nil {
-		return fmt.Errorf("staff-incorporate: artifact store is required")
-	}
-	return nil
-}
-
-func readDocumentBody(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	if _, body, err := artifact.ParseFrontMatter(data); err == nil {
-		return body, nil
-	}
-	return data, nil
 }
 
 func createTmuxWindow(name, dir string) error {

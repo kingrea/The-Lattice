@@ -2,13 +2,13 @@ package action_plan
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/yourusername/lattice/internal/artifact"
 	"github.com/yourusername/lattice/internal/module"
+	"github.com/yourusername/lattice/internal/modules/runtime"
 )
 
 const (
@@ -57,7 +57,7 @@ func New() *ActionPlanModule {
 // Run ensures prerequisites exist, spawns the OpenCode session when needed, and
 // keeps running until both MODULES.md and PLAN.md are ready.
 func (m *ActionPlanModule) Run(ctx *module.ModuleContext) (module.Result, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return module.Result{Status: module.StatusFailed}, err
 	}
 	if missing, err := m.missingInput(ctx); err != nil {
@@ -102,11 +102,12 @@ func (m *ActionPlanModule) Run(ctx *module.ModuleContext) (module.Result, error)
 // IsComplete verifies that both output documents exist with the expected
 // metadata.
 func (m *ActionPlanModule) IsComplete(ctx *module.ModuleContext) (bool, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return false, err
 	}
+	inputs := runtime.WithInputs(m.Inputs()...)
 	for _, ref := range m.Outputs() {
-		ready, err := m.ensureArtifact(ctx, ref)
+		ready, err := runtime.EnsureDocument(ctx, moduleID, moduleVersion, ref, inputs)
 		if err != nil {
 			return false, err
 		}
@@ -131,99 +132,12 @@ func (m *ActionPlanModule) missingInput(ctx *module.ModuleContext) (string, erro
 	return "", nil
 }
 
-func (m *ActionPlanModule) ensureArtifact(ctx *module.ModuleContext, ref artifact.ArtifactRef) (bool, error) {
-	result, err := ctx.Artifacts.Check(ref)
-	if err != nil {
-		return false, fmt.Errorf("action-plan: check %s: %w", ref.ID, err)
-	}
-	switch result.State {
-	case artifact.StateReady:
-		if result.Metadata == nil || result.Metadata.ModuleID != moduleID || result.Metadata.Version != moduleVersion {
-			if err := m.writeMetadata(ctx, ref); err != nil {
-				return false, err
-			}
-			return false, nil
-		}
-		return true, nil
-	case artifact.StateMissing:
-		return false, nil
-	case artifact.StateInvalid:
-		if err := m.writeMetadata(ctx, ref); err != nil {
-			return false, err
-		}
-		return false, nil
-	case artifact.StateError:
-		if result.Err != nil {
-			return false, fmt.Errorf("action-plan: %s: %w", ref.ID, result.Err)
-		}
-		return false, fmt.Errorf("action-plan: %s encountered an unknown error", ref.ID)
-	default:
-		return false, nil
-	}
-}
-
-func (m *ActionPlanModule) writeMetadata(ctx *module.ModuleContext, ref artifact.ArtifactRef) error {
-	path := ref.Path(ctx.Workflow)
-	if path == "" {
-		return fmt.Errorf("action-plan: unable to resolve path for %s", ref.ID)
-	}
-	body, err := readDocumentBody(path)
-	if err != nil {
-		return fmt.Errorf("action-plan: read %s: %w", ref.ID, err)
-	}
-	meta := artifact.Metadata{
-		ArtifactID: ref.ID,
-		ModuleID:   moduleID,
-		Version:    moduleVersion,
-		Workflow:   ctx.Workflow.Dir(),
-		Inputs: []string{
-			artifact.CommissionDoc.ID,
-			artifact.ArchitectureDoc.ID,
-			artifact.ConventionsDoc.ID,
-		},
-	}
-	if err := ctx.Artifacts.Write(ref, body, meta); err != nil {
-		return fmt.Errorf("action-plan: write %s: %w", ref.ID, err)
-	}
-	return nil
-}
-
 func (m *ActionPlanModule) stopSession() {
 	if m.windowName == "" {
 		return
 	}
 	killTmuxWindow(m.windowName)
 	m.windowName = ""
-}
-
-func validateContext(ctx *module.ModuleContext) error {
-	if ctx == nil {
-		return fmt.Errorf("action-plan: context is nil")
-	}
-	if ctx.Config == nil {
-		return fmt.Errorf("action-plan: config is required")
-	}
-	if ctx.Workflow == nil {
-		return fmt.Errorf("action-plan: workflow is required")
-	}
-	if ctx.Artifacts == nil {
-		return fmt.Errorf("action-plan: artifact store is required")
-	}
-	return nil
-}
-
-func readDocumentBody(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	if _, body, err := artifact.ParseFrontMatter(data); err == nil {
-		return body, nil
-	}
-	return data, nil
 }
 
 func createTmuxWindow(name, dir string) error {

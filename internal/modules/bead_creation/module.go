@@ -11,6 +11,7 @@ import (
 
 	"github.com/yourusername/lattice/internal/artifact"
 	"github.com/yourusername/lattice/internal/module"
+	"github.com/yourusername/lattice/internal/modules/runtime"
 )
 
 const (
@@ -55,7 +56,7 @@ func New() *BeadCreationModule {
 
 // Run ensures beads are initialized and launches the tmux session.
 func (m *BeadCreationModule) Run(ctx *module.ModuleContext) (module.Result, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return module.Result{Status: module.StatusFailed}, err
 	}
 	if err := ensureBeadsInitialized(ctx.Config.ProjectDir); err != nil {
@@ -99,32 +100,18 @@ func (m *BeadCreationModule) Run(ctx *module.ModuleContext) (module.Result, erro
 
 // IsComplete waits for the beads-created marker.
 func (m *BeadCreationModule) IsComplete(ctx *module.ModuleContext) (bool, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return false, err
 	}
-	result, err := ctx.Artifacts.Check(artifact.BeadsCreatedMarker)
+	ready, err := runtime.EnsureMarker(ctx, moduleID, moduleVersion, artifact.BeadsCreatedMarker)
 	if err != nil {
-		return false, fmt.Errorf("bead-creation: check marker: %w", err)
+		return false, err
 	}
-	switch result.State {
-	case artifact.StateReady:
+	if ready {
 		m.stopSession()
 		return true, nil
-	case artifact.StateMissing:
-		return false, nil
-	case artifact.StateInvalid:
-		if err := ctx.Artifacts.Write(artifact.BeadsCreatedMarker, nil, artifact.Metadata{ArtifactID: artifact.BeadsCreatedMarker.ID, ModuleID: moduleID, Version: moduleVersion, Workflow: ctx.Workflow.Dir()}); err != nil {
-			return false, fmt.Errorf("bead-creation: rewrite marker: %w", err)
-		}
-		return false, nil
-	case artifact.StateError:
-		if result.Err != nil {
-			return false, fmt.Errorf("bead-creation: marker error: %w", result.Err)
-		}
-		return false, fmt.Errorf("bead-creation: marker encountered unknown error")
-	default:
-		return false, nil
 	}
+	return false, nil
 }
 
 func (m *BeadCreationModule) missingInput(ctx *module.ModuleContext) (string, error) {
@@ -146,22 +133,6 @@ func (m *BeadCreationModule) stopSession() {
 	}
 	killTmuxWindow(m.windowName)
 	m.windowName = ""
-}
-
-func validateContext(ctx *module.ModuleContext) error {
-	if ctx == nil {
-		return fmt.Errorf("bead-creation: context is nil")
-	}
-	if ctx.Config == nil {
-		return fmt.Errorf("bead-creation: config is required")
-	}
-	if ctx.Workflow == nil {
-		return fmt.Errorf("bead-creation: workflow is required")
-	}
-	if ctx.Artifacts == nil {
-		return fmt.Errorf("bead-creation: artifact store is required")
-	}
-	return nil
 }
 
 func ensureBeadsInitialized(projectDir string) error {

@@ -2,13 +2,13 @@ package parallel_reviews
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/yourusername/lattice/internal/artifact"
 	"github.com/yourusername/lattice/internal/module"
+	"github.com/yourusername/lattice/internal/modules/runtime"
 )
 
 const (
@@ -105,7 +105,7 @@ func New() *ParallelReviewsModule {
 
 // Run validates prerequisites and starts the reviewer sessions when needed.
 func (m *ParallelReviewsModule) Run(ctx *module.ModuleContext) (module.Result, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return module.Result{Status: module.StatusFailed}, err
 	}
 	if missing, err := m.missingInput(ctx); err != nil {
@@ -151,11 +151,12 @@ func (m *ParallelReviewsModule) Run(ctx *module.ModuleContext) (module.Result, e
 
 // IsComplete checks whether all reviewer artifacts exist with metadata.
 func (m *ParallelReviewsModule) IsComplete(ctx *module.ModuleContext) (bool, error) {
-	if err := validateContext(ctx); err != nil {
+	if err := runtime.ValidateContext(moduleID, ctx); err != nil {
 		return false, err
 	}
+	inputs := runtime.WithInputs(m.Inputs()...)
 	for _, reviewer := range reviewerConfigs {
-		ready, err := m.ensureReview(ctx, reviewer.artifactRef)
+		ready, err := runtime.EnsureDocument(ctx, moduleID, moduleVersion, reviewer.artifactRef, inputs)
 		if err != nil {
 			return false, err
 		}
@@ -181,65 +182,6 @@ func (m *ParallelReviewsModule) missingInput(ctx *module.ModuleContext) (string,
 	return "", nil
 }
 
-func (m *ParallelReviewsModule) ensureReview(ctx *module.ModuleContext, ref artifact.ArtifactRef) (bool, error) {
-	result, err := ctx.Artifacts.Check(ref)
-	if err != nil {
-		return false, fmt.Errorf("parallel-reviews: check %s: %w", ref.ID, err)
-	}
-	switch result.State {
-	case artifact.StateReady:
-		if result.Metadata == nil || result.Metadata.ModuleID != moduleID || result.Metadata.Version != moduleVersion {
-			if err := m.writeMetadata(ctx, ref); err != nil {
-				return false, err
-			}
-			return false, nil
-		}
-		return true, nil
-	case artifact.StateMissing:
-		return false, nil
-	case artifact.StateInvalid:
-		if err := m.writeMetadata(ctx, ref); err != nil {
-			return false, err
-		}
-		return false, nil
-	case artifact.StateError:
-		if result.Err != nil {
-			return false, fmt.Errorf("parallel-reviews: %s: %w", ref.ID, result.Err)
-		}
-		return false, fmt.Errorf("parallel-reviews: %s encountered an unknown error", ref.ID)
-	default:
-		return false, nil
-	}
-}
-
-func (m *ParallelReviewsModule) writeMetadata(ctx *module.ModuleContext, ref artifact.ArtifactRef) error {
-	path := ref.Path(ctx.Workflow)
-	if path == "" {
-		return fmt.Errorf("parallel-reviews: unable to resolve path for %s", ref.ID)
-	}
-	body, err := readDocumentBody(path)
-	if err != nil {
-		return fmt.Errorf("parallel-reviews: read %s: %w", ref.ID, err)
-	}
-	meta := artifact.Metadata{
-		ArtifactID: ref.ID,
-		ModuleID:   moduleID,
-		Version:    moduleVersion,
-		Workflow:   ctx.Workflow.Dir(),
-		Inputs: []string{
-			artifact.CommissionDoc.ID,
-			artifact.ArchitectureDoc.ID,
-			artifact.ConventionsDoc.ID,
-			artifact.ModulesDoc.ID,
-			artifact.ActionPlanDoc.ID,
-		},
-	}
-	if err := ctx.Artifacts.Write(ref, body, meta); err != nil {
-		return fmt.Errorf("parallel-reviews: write %s: %w", ref.ID, err)
-	}
-	return nil
-}
-
 func (m *ParallelReviewsModule) killWindows(names []string) {
 	for _, name := range names {
 		if name == "" {
@@ -247,36 +189,6 @@ func (m *ParallelReviewsModule) killWindows(names []string) {
 		}
 		killTmuxWindow(name)
 	}
-}
-
-func validateContext(ctx *module.ModuleContext) error {
-	if ctx == nil {
-		return fmt.Errorf("parallel-reviews: context is nil")
-	}
-	if ctx.Config == nil {
-		return fmt.Errorf("parallel-reviews: config is required")
-	}
-	if ctx.Workflow == nil {
-		return fmt.Errorf("parallel-reviews: workflow is required")
-	}
-	if ctx.Artifacts == nil {
-		return fmt.Errorf("parallel-reviews: artifact store is required")
-	}
-	return nil
-}
-
-func readDocumentBody(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	if _, body, err := artifact.ParseFrontMatter(data); err == nil {
-		return body, nil
-	}
-	return data, nil
 }
 
 func createTmuxWindow(name, dir string) error {
