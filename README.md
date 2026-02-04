@@ -99,6 +99,45 @@ lattice
 └────────────────────────────────────────────────────┘
 ```
 
+## Default Module Workflow
+
+The workflow engine executes modules declared in
+`workflows/commission-work.yaml`. The shipping definition runs the full delivery
+pipeline:
+
+1. `anchor-docs` – generate COMMISSION/ARCHITECTURE/CONVENTIONS via the planning
+   skill
+2. `action-plan` – derive MODULES.md and PLAN.md
+3. `staff-review` – collect the staff engineer review package
+4. `staff-incorporate` – apply staff feedback and stamp readiness markers
+5. `parallel-reviews` – run the four reviewer personas in tmux
+6. `consolidation` – synthesize reviewer feedback back into the plan
+7. `bead-creation` – initialize bd, create beads, and write `.beads-created`
+8. `orchestrator-selection` – select the orchestrator and refresh roster
+   metadata
+9. `hiring` – build the worker roster + AGENT briefs
+10. `work-process` – stage/execute work cycles and update work logs
+11. `refinement` – run stakeholder audits when `.refinement-needed` exists
+12. `release` – package artifacts, write release notes, and reset runtime dirs
+
+The resolver enforces these dependencies, so when a module completes (or reports
+`no-op` because its artifact already matches), downstream nodes automatically
+unlock. See `docs/README.md` for a tabular view plus deep dives on each module.
+
+### Running Modules
+
+- **TUI workflow view** – Select **Commission Work** to start a run or **Resume
+  Work** to reload the persisted engine state. The Workflow pane shows ready,
+  running, and blocked modules along with manual gate prompts.
+- **Headless CLI** – Use `module-runner` to execute a module outside the TUI:
+
+  ```bash
+  module-runner --project /path/to/project --module work-process
+  ```
+
+  Add `--config-file` and `--set key=value` overrides to tweak module-specific
+  behavior. The CLI shares the same registry and artifact contracts as the TUI.
+
 ## Project Structure
 
 ```
@@ -191,6 +230,9 @@ modules:
 
 Those overrides live in the workflow definition so the TUI, resolver, and the
 headless CLI all see the same configuration.
+
+See `docs/README.md` for the end-to-end module pipeline overview and links to
+the runtime/reference docs.
 
 ## Error Recovery
 

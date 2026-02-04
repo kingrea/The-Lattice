@@ -1,0 +1,59 @@
+# Lattice Docs Overview
+
+This directory houses reference material for the module runtime. Start here for
+an overview of how the planning, staffing, work, refinement, and release modules
+connect, then dive into the focused primers alongside it when you need deeper
+context.
+
+## Module Pipeline
+
+The default `commission-work` workflow wires the following modules in order. The
+engine enforces these dependencies automatically:
+
+| Order | Module ID                | Purpose                                                                                           |
+| ----- | ------------------------ | ------------------------------------------------------------------------------------------------- |
+| 1     | `anchor-docs`            | Launches the planning skill to produce COMMISSION/ARCHITECTURE/CONVENTIONS.                       |
+| 2     | `action-plan`            | Converts anchor docs into MODULES/PLAN.                                                           |
+| 3     | `staff-review`           | Runs the staff engineer review on MODULES/PLAN.                                                   |
+| 4     | `staff-incorporate`      | Applies staff feedback, stamping readiness markers.                                               |
+| 5     | `parallel-reviews`       | Executes the persona reviews in tmux.                                                             |
+| 6     | `consolidation`          | Synthesizes reviewer feedback back into PLAN.md.                                                  |
+| 7     | `bead-creation`          | Initializes `bd`, creates beads, and writes the `.beads-created` marker.                          |
+| 8     | `orchestrator-selection` | Chooses the orchestrator and refreshes `workflow/orchestrator.json` plus `workers.json`.          |
+| 9     | `hiring`                 | Builds the worker roster, generates AGENT briefs, and records support packets.                    |
+| 10    | `work-process`           | Stages work cycles, runs the orchestrator loop, and updates work logs/markers.                    |
+| 11    | `refinement`             | Runs stakeholder audits when `.refinement-needed` is present and clears it on completion.         |
+| 12    | `release`                | Packages artifacts, writes release notes, and clears runtime directories for the next commission. |
+
+Every module declares its artifact inputs/outputs inside `internal/artifact` and
+is registered through `internal/modules/modules.go`. Updating the workflow YAML
+is enough to change the pipeline order so the TUI, engine, and headless CLIs all
+see the same topology.
+
+## Running Modules
+
+### Bubble Tea workflow view
+
+The TUI's **Workflow** pane reflects the current engine snapshot. Use the inline
+shortcuts to run modules, approve manual gates, or rerun nodes that reported
+`needs-input`. Once a module completes, the resolver automatically unblocks its
+dependents based on the YAML definition above.
+
+### `module-runner` CLI
+
+For headless or automated runs, use `cmd/module-runner`:
+
+```bash
+module-runner \
+  --project /path/to/project \
+  --module work-process \
+  --config-file overrides/work-process.yaml \
+  --set max_parallel=2
+```
+
+`module-runner` bootstraps the same registry and workflow context as the TUI.
+The CLI respects workflow state, so running `module-runner --module refinement`
+does nothing until the `.refinement-needed` marker exists.
+
+Refer to `docs/modular-runtime.md` for deep dives into the resolver, scheduler,
+and artifact metadata, plus `docs/error-recovery.md` for troubleshooting flows.

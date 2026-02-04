@@ -55,4 +55,43 @@ modules:
     name: Create Beads
     description: Converts the consolidated plan into beads for scheduling.
     depends_on: [consolidation]
-    optional: true
+
+  - id: orchestrator-selection
+    module: orchestrator-selection
+    name: Select Orchestrator
+    description:
+      Locks the orchestrator roster, writes workflow/orchestrator.json, and
+      snapshots workers.json for downstream staffing modules.
+    depends_on: [bead-creation]
+
+  - id: hiring
+    module: hiring
+    name: Hire Workers
+    description:
+      Builds the worker roster, generates AGENT briefs, and prepares support
+      packets so work cycles can be scheduled.
+    depends_on: [orchestrator-selection]
+
+  - id: work-process
+    module: work-process
+    name: Run Work Cycle
+    description:
+      Dispatches work sessions through the orchestrator, writes work logs, and
+      emits the work completion markers consumed by refinement and release.
+    depends_on: [hiring]
+
+  - id: refinement
+    module: refinement
+    name: Run Refinement Audits
+    description:
+      Drives stakeholder audits and only runs when the refinement-needed marker
+      is present; clears it once audits and follow-up cycles finish.
+    depends_on: [work-process]
+
+  - id: release
+    module: release
+    name: Finalize Release
+    description:
+      Packages artifacts, writes release notes, resets runtime directories, and
+      emits the release markers before the next commission.
+    depends_on: [refinement]
