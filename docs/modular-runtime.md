@@ -57,6 +57,24 @@ focused on guiding the human through the phase.
 5. Mode reacts: update UI, emit `ModeProgressMsg`, mark itself complete, or ask
    the operator to intervene.
 
+### Workflow dependency resolver
+
+The workflow engine consumes workflow definitions via the dependency resolver in
+`internal/workflow/resolver`. The resolver:
+
+- Normalizes the workflow graph (merging inline `depends_on` edges) and
+  instantiates each module from the shared registry.
+- Evaluates completion state by calling `Module.IsComplete`, then marks modules
+  as `ready`, `blocked`, `error`, or `complete` based on upstream readiness.
+- Exposes a queue builder that returns the modules required to satisfy a set of
+  targets, automatically inserting prerequisites when inputs are missing.
+- Provides metadata for the engine/TUI (module reference, dependencies,
+  dependents) so higher layers can render intent without re-building the graph.
+
+Modes and the future workflow engine should call `Resolver.Refresh` to capture a
+fresh snapshot, then read `Resolver.Ready()` or `Resolver.Queue()` when deciding
+what to run next.
+
 This explicit split lets us evolve the runtime incrementally: we can convert one
 mode at a time to modules without blocking the rest of the CLI.
 
