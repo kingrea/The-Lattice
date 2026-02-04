@@ -65,6 +65,8 @@ func main() {
 	if err != nil {
 		die("resolve module: %v", err)
 	}
+	info := mod.Info()
+	label := moduleLabel(info, *moduleID)
 	result, err := mod.Run(ctx)
 	if err != nil {
 		die("run module: %v", err)
@@ -74,7 +76,7 @@ func main() {
 		fmt.Println(result.Message)
 	}
 	if result.Status == module.StatusCompleted || result.Status == module.StatusNoOp {
-		fmt.Println("Module completed without polling.")
+		fmt.Printf("%s completed without polling.\n", label)
 		return
 	}
 	ticker := time.NewTicker(*pollInterval)
@@ -85,10 +87,10 @@ func main() {
 			die("check completion: %v", err)
 		}
 		if complete {
-			fmt.Println("Module completed successfully.")
+			fmt.Printf("%s completed successfully.\n", label)
 			return
 		}
-		fmt.Println("Waiting for anchor docs outputs...")
+		fmt.Printf("Waiting for %s outputs...\n", label)
 		<-ticker.C
 	}
 }
@@ -148,6 +150,16 @@ func buildModuleConfig(configFile string, overrides keyValueFlag) (module.Config
 		return nil, nil
 	}
 	return cfg, nil
+}
+
+func moduleLabel(info module.Info, fallback string) string {
+	if name := strings.TrimSpace(info.Name); name != "" {
+		return name
+	}
+	if id := strings.TrimSpace(info.ID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func readModuleConfigFile(path string) (module.Config, error) {

@@ -192,6 +192,27 @@ modules:
 Those overrides live in the workflow definition so the TUI, resolver, and the
 headless CLI all see the same configuration.
 
+## Error Recovery
+
+The workflow engine persists a snapshot of every run under
+`.lattice/workflow/engine/state.json`. When a module fails, the workflow view
+shows which node broke (`last run: failed`) and the engine status banner flips
+to `Status: Error`. Recovery is deterministic:
+
+1. Inspect the failed module in the workflow view to read the stored error
+   message and artifact status.
+2. Fix the underlying issue (edit the artifact, adjust config, or rerun the
+   module with the built-in workflow view or headless via
+   `module-runner --project <dir> --module <module-id>`).
+3. Press `r` in the workflow view or start `lattice` and select **Resume Work**
+   so the engine refreshes the resolver snapshot, unblocks downstream modules,
+   and returns to the `running` status once everything is healthy.
+
+Manual gates (`g`/`a`), optional module skipping (`s`), and the persisted
+`state.json` make it safe to pause, fix artifacts, and resume without touching
+internal files. See `docs/error-recovery.md` for the full walkthrough covering
+resolver invalidation events, scheduler skip reasons, and CLI-driven recoveries.
+
 ## Customization
 
 ### Module configuration overrides

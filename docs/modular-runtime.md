@@ -163,6 +163,49 @@ Consumers can call `View()` to read the last snapshot or rely on
 workflow definition, the engine can rebuild resolver/scheduler instances without
 the UI needing to stash additional context.
 
+### Error recovery path
+
+When something breaks mid-run, the runtime records enough context to make the
+next steps deterministic:
+
+1. **Module execution → result tracking** – Every `module.Module` returns a
+   `module.Result` with one of four statuses (`completed`, `no-op`,
+   `needs-input`, `failed`). `workflowView` wraps those inside
+   `engine.ModuleStatusUpdate` when the Bubble Tea worker finishes. The engine
+   stores the result (plus any error) in `state.Runs[id]` so the UI and future
+   automation can display "last run: failed" or "needs input" alongside the
+   module description.
+2. **Resolver refresh** – On the next `engine.Update` or `engine.Resume`, the
+   resolver calls `Module.IsComplete` again. If the failure prevented outputs
+   from being written (or you edited artifacts manually), the resolver
+   downgrades the node back to `pending` and evaluates artifact metadata.
+   Invalid or outdated artifacts emit `module.ArtifactInvalidation` events,
+   attach details to `ModuleStatus.Artifacts`, and keep downstream nodes blocked
+   until the offending module runs cleanly.
+3. **Scheduler enforcement** – The scheduler inspects the refreshed node states
+   and `Runtime.ManualGates`. Failed modules simply fall out of the `running`
+   set, so their dependents stay blocked. Nodes that require manual approval are
+   skipped with `SkipReasonManualGate` until the operator toggles approval in
+   the workflow view.
+4. **Engine status + resumptions** – If any module run reports `failed` or a
+   resolver node transitions to `NodeStateError`, `deriveEngineStatus` marks the
+   run as `error` and surfaces the offending module ID. Selecting **Resume
+   Work** from the TUI menu triggers `engine.Resume`, which reloads
+   `.lattice/workflow/engine/state.json`, replays runtime overrides (targets,
+   manual gates, running IDs), and immediately re-runs the resolver so new file
+   edits are reflected.
+5. **Retry mechanics** – Operators can rerun the failed module directly in the
+   workflow view (select the module → `Enter`). For headless retries use
+   `module-runner --project /path/to/project --module <module-id>`; the CLI uses
+   the same registry/config pipeline as the TUI. Once the module completes, call
+   **Resume Work** (or wait for the automatic refresh) so the engine ingests the
+   new status and unblocks downstream nodes.
+
+Because every failure transitions through the resolver → scheduler → engine
+loop, recovery is always "fix the artifact or code, rerun the module, refresh".
+No manual database surgery is required—the persisted state plus artifact
+metadata is enough to recompute readiness.
+
 ### Artifact metadata + versioning
 
 Every document artifact now receives a `lattice` YAML frontmatter block (JSON
