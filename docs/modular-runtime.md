@@ -342,3 +342,33 @@ change. The policy is straightforward:
   down-cycle, and guarantees `workflow/work/.complete` exists before release
   starts. Refinement and release modules read the work log, per-agent summaries,
   and `.refinement-needed` marker to plan audits or deploy artifacts.
+
+### Refinement module IO
+
+- **Inputs** – Refinement only runs once work-process has raised the
+  `.refinement-needed` marker (`artifact.RefinementNeededMarker`). It also needs
+  the roster artifacts (`workflow/team/workers.json` plus the generated
+  `.lattice/agents/**/AGENT.md` dossiers) and the previous work cycle outputs:
+  `.complete` marker, work log, agent summaries, and any `workflow/worktree/`
+  archives. The module inspects `ModuleContext.Config.ProjectDir` (package.json,
+  go.mod, etc.) to classify the project before it chooses stakeholder roles.
+- **Configuration dependencies** – Same orchestrator plumbing as work-process:
+  `ModuleContext.Orchestrator` must be initialised with functioning `tmux`,
+  `opencode`, `bd`, and the `opencode-worktree` plugin. Workflow directories
+  must be writable so the module can emit `stakeholders.json`, audit markdown
+  under `.lattice/workflow/audit/`, and rewrite work markers inside
+  `.lattice/workflow/work/` while it drives a follow-up cycle. Operators may
+  also launch manual review tmux windows, so session cleanup hooks must be
+  available.
+- **Outputs** – A structured `workflow/team/stakeholders.json` manifest that
+  maps roughly ten stakeholder roles to available agents, Markdown audits in
+  `workflow/audit/<role>-audit.md`, and a synthesized
+  `workflow/audit/SYNTHESIS.md` file listing every bead opened from the audits.
+  Running the module marks `.in-progress` during the follow-up cycle, rewrites
+  `.complete` on success, and removes `.refinement-needed` once the operator
+  acknowledges completion (even if no ready beads were available for the
+  follow-up cycle).
+- **Side effects** – `RunAuditSynthesis` shells out to `bd create` for each
+  finding, so new beads show up in the queue with provenance linking back to the
+  audits. Manual review sessions can be spawned on demand, and their tmux window
+  IDs are returned so Bubble Tea can surface cleanup controls.

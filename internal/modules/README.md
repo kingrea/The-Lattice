@@ -37,6 +37,19 @@ substeps outlined in `.ai/MODULAR_WORKFLOW_PLAN.md`:
       `.lattice/state/cycle-*/SUMMARY.md`, refreshed `state/REPO_MEMORY.md`, and
       appended `workflow/work/work-log.md` entries.
 11. `refinement` – Handle post-work QA loops
+    - Inputs: `.lattice/workflow/work/.refinement-needed` gate from
+      work-process, the roster artifacts (`workflow/team/workers.json` plus
+      generated `.lattice/agents/**/AGENT.md` dossiers), existing work-cycle
+      outputs (`.complete`, work-log, worktree archives), and repository
+      metadata (e.g. package.json, go.mod) used to classify the project profile.
+    - Runtime deps: same orchestrator plumbing as work-process – tmux,
+      opencode + opencode-worktree plugin, bd CLI, and writable workflow
+      directories for audit + work markers.
+    - Outputs: `workflow/team/stakeholders.json`, Markdown audits under
+      `workflow/audit/`, a synthesized `SYNTHESIS.md` that records every bead
+      opened from the audits, and refreshed `.in-progress`/`.complete` markers
+      (plus removal of `.refinement-needed`). Audit synthesis also shells out to
+      `bd create`, so the follow-up beads appear in the queue for release.
 
 Each subdirectory contains a Go package reserved for the module. They only
 expose a `doc.go` placeholder today so future patches can land actual logic
