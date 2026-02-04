@@ -49,5 +49,6 @@ type Module interface {
 	Info() Info
 	Inputs() []artifact.ArtifactRef
 	Outputs() []artifact.ArtifactRef
+	IsComplete(ctx *ModuleContext) (bool, error)
 	Run(ctx *ModuleContext) (Result, error)
 }
