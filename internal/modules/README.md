@@ -17,7 +17,14 @@ substeps outlined in `.ai/MODULAR_WORKFLOW_PLAN.md`:
    - Outputs: `.lattice/workflow/orchestrator.json` (with `_lattice` metadata)
      and an updated `workflow/team/workers.json` referencing the selected
      denizen.
-9. `hiring` – Build workers.json + agent folders
+9. `hiring` – Convert the consolidated plan into a roster and AGENT.md files
+   - Inputs: `.lattice/workflow/orchestrator.json`,
+     `.lattice/action/MODULES.md`, `.lattice/action/PLAN.md`, and
+     `.lattice/action/.beads-created`.
+   - Outputs: `.lattice/workflow/team/workers.json` with `_lattice` provenance,
+     refreshed `.lattice/agents/{workers,specialists}/<slug>/AGENT.md` folders,
+     staged CV copies under `.lattice/setup/cvs/<community>/<name>/`, plus a
+     `HIRE` epic in bd with per-agent beads tracking dossier authorship.
 10. `work_process` – Drive agents through execution
 11. `refinement` – Handle post-work QA loops
 

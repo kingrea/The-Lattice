@@ -280,3 +280,30 @@ change. The policy is straightforward:
   `reviews-applied`, and `beads-created`. The module also updates
   `artifact.WorkersJSON` (`workflow/team/workers.json`) so hiring can see the
   orchestrator roster entry with matching provenance.
+
+### Hiring module IO
+
+- **Inputs** – Hiring will not run until orchestration is locked in. It consumes
+  `.lattice/workflow/orchestrator.json` (`artifact.OrchestratorState`) plus the
+  consolidated plan artifacts: `.lattice/action/MODULES.md`
+  (`artifact.ModulesDoc`), `.lattice/action/PLAN.md` (`artifact.ActionPlanDoc`),
+  and the `.beads-created` marker (`artifact.BeadsCreatedMarker`). These inputs
+  guarantee bead creation is finished and the workload snapshot is stable.
+- **Configuration dependencies** – The module needs a fully initialised
+  `ModuleContext.Orchestrator` capable of `LoadDenizenCVs()` so it can enumerate
+  denizens from `<LATTICE_ROOT>/communities/*/cvs/**`. `ModuleContext.Config`
+  must expose writable `AgentsDir()` and `WorkerListPath()` locations because
+  the module rewrites `.lattice/agents/{workers,specialists}/<slug>/AGENT.md`
+  files alongside `workflow/team/workers.json`. Hiring shells out to `tmux`,
+  `opencode`, and `skills.Ensure` to run the bundled `create-agent-file` skill
+  for each hire, and it shells out to `bd ready --json` plus repeated
+  `bd create` commands to size the workload and mint follow-up beads.
+- **Outputs** – At minimum the module writes `artifact.WorkersJSON`
+  (`workflow/team/workers.json`) populated with worker/specialist entries,
+  capacities, `isSpark` flags, and `_lattice` provenance metadata referencing
+  the artifacts above. It also generates AGENT.md dossiers beneath
+  `.lattice/agents/`, staging source CVs into
+  `.lattice/setup/cvs/<community>/<name>/` before invoking the skill.
+  Additionally an epic titled `HIRE` and one bead per agent are created in bd so
+  subsequent modules (work-process, refinement) can trace AGENT.md creation
+  tasks.
