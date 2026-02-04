@@ -146,12 +146,11 @@ func InitLatticeDir(projectDir string) error {
 
 // NewConfig creates a new Config instance populated with project settings.
 func NewConfig(projectDir string) (*Config, error) {
-	// TODO: Make this configurable via env var or config file
-	// For now, hardcode your path. On Windows/WSL this would be something like:
-	// /mnt/g/The Lattice
+	// LATTICE_ROOT must be set to the directory containing the lattice CLI source.
+	// This is where agents/, skills/, and defaults/ are located.
 	latticeRoot := os.Getenv("LATTICE_ROOT")
 	if latticeRoot == "" {
-		latticeRoot = "/mnt/g/The Lattice" // Default for your setup
+		return nil, fmt.Errorf("LATTICE_ROOT environment variable is not set; see README.md for setup instructions")
 	}
 
 	cfg := &Config{

@@ -14,16 +14,17 @@ A TUI (Terminal User Interface) for orchestrating AI agent workflows via tmux.
 ## Quick Start
 
 ```bash
-# 1. Clone/copy this to your Lattice root (e.g., G:\The Lattice or /mnt/g/The Lattice)
-cd /mnt/g/The\ Lattice
+# 1. Clone this repo
+git clone https://github.com/the-lattice/lattice.git
+cd lattice
 
 # 2. Build
 chmod +x build.sh
 ./build.sh install
 
-# 3. Add to PATH (add this to ~/.bashrc)
+# 3. Add to PATH and set LATTICE_ROOT (add to ~/.bashrc or ~/.zshrc)
 export PATH="$HOME/.local/bin:$PATH"
-export LATTICE_ROOT="/mnt/g/The Lattice"  # Point to your Lattice installation
+export LATTICE_ROOT="$(pwd)"  # Point to your Lattice installation
 
 # 4. Run from any project!
 cd /path/to/some/project
@@ -133,11 +134,26 @@ your-project/
 
 ## Configuration
 
-Set `LATTICE_ROOT` environment variable to point to your Lattice installation:
+### Required: LATTICE_ROOT
+
+The `LATTICE_ROOT` environment variable **must** be set to point to your Lattice
+CLI installation directory (where this repo is cloned). This is used to locate:
+
+- Core agent definitions (`agents/core/`)
+- Workflow skills (`skills/`)
+- Default community configuration (`defaults/community.yaml`)
 
 ```bash
-export LATTICE_ROOT="/mnt/g/The Lattice"
+# Add to ~/.bashrc or ~/.zshrc
+export LATTICE_ROOT="/path/to/lattice"
+
+# Examples:
+# Linux/WSL:  export LATTICE_ROOT="/mnt/g/lattice"
+# macOS:      export LATTICE_ROOT="$HOME/projects/lattice"
+# Windows:    set LATTICE_ROOT=G:\lattice
 ```
+
+Without this variable, the CLI will fail to find required assets.
 
 ## Customization
 

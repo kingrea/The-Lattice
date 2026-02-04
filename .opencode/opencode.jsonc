@@ -1,7 +1,6 @@
 {
-	"$schema": "https://opencode.ai/config.json",
-	"plugin": [
-		"opencode-worktree"
-	]
-	// Add MCP servers, tools, plugins here
+    "$schema": "https://opencode.ai/config.json",
+    "plugin": [
+        "opencode-beads"
+    ]
 }
