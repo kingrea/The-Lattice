@@ -19,6 +19,10 @@ type WorkerEntry struct {
 	Capacity  int    `json:"capacity,omitempty"`
 }
 
+type workerRosterEnvelope struct {
+	Workers []WorkerEntry `json:"workers"`
+}
+
 // LoadWorkers reads the worker roster from disk.
 func LoadWorkers(path string) ([]WorkerEntry, error) {
 	data, err := os.ReadFile(path)
@@ -26,10 +30,18 @@ func LoadWorkers(path string) ([]WorkerEntry, error) {
 		return nil, err
 	}
 	var workers []WorkerEntry
-	if err := json.Unmarshal(data, &workers); err != nil {
-		return nil, fmt.Errorf("failed to parse workers roster: %w", err)
+	if err := json.Unmarshal(data, &workers); err == nil {
+		return workers, nil
 	}
-	return workers, nil
+	var envelope workerRosterEnvelope
+	envErr := json.Unmarshal(data, &envelope)
+	if envErr == nil && envelope.Workers != nil {
+		return envelope.Workers, nil
+	}
+	if envErr == nil {
+		envErr = fmt.Errorf("missing workers array")
+	}
+	return nil, fmt.Errorf("failed to parse workers roster: %w", envErr)
 }
 
 // SaveWorkers writes the worker roster to disk, preserving directory structure.
