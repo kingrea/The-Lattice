@@ -308,3 +308,37 @@ change. The policy is straightforward:
   skill. Additionally an epic titled `HIRE` and one bead per agent are created
   in bd so subsequent modules (work-process, refinement) can trace AGENT brief
   creation tasks.
+
+### Work-process module IO
+
+- **Inputs** – The module only runs once hiring has produced
+  `workflow/team/workers.json` (`artifact.WorkersJSON`) and the orchestrator
+  module has written `workflow/orchestrator.json`
+  (`artifact.OrchestratorState`). It also expects the roster’s generated
+  AGENT/MEMORY files under `.lattice/agents/` plus a ready queue of beads in
+  `bd` (populated after the `artifact.BeadsCreatedMarker`). Without those
+  dossiers or beads the module cannot bind sessions to agents.
+- **Configuration dependencies** – `ModuleContext.Orchestrator` must be wired so
+  `PrepareWorkCycle`/`RunUpCycle` can launch `tmux` → `opencode` flows, install
+  the `opencode-worktree` plugin, and issue `bd ready --json`. The module relies
+  on writable `WorktreeDir()` and `SkillsDir()` paths for per-agent worktrees
+  and bundled skills (`final-session`, `down-cycle`, `down-cycle-agent`,
+  `local-dreaming`). `WorkerListPath()`, `AgentsDir()`, and `StateDir()` must
+  point to the same `.lattice` tree so cycle trackers, plan updates, and memory
+  files live alongside previous modules’ outputs.
+- **Outputs** – Each run writes `workflow/work/.in-progress` before dispatching
+  sessions, `workflow/work/current-cycle.json` to persist the prepared roster,
+  and `workflow/work/.complete` once the down-cycle finishes (or
+  `.refinement-needed` when no beads are ready, which refinement treats as its
+  entry point). It materialises worktrees under `.lattice/worktree/<cycle>/`
+  with refreshed `WORKTREE.md`, question inbox/outbox mailboxes, logs, and
+  `SUMMARY.md` files per agent plus orchestrator summaries in
+  `.lattice/state/cycle-<n>/SUMMARY.md`. The module appends every cycle report
+  to `.lattice/workflow/work/work-log.md` (`artifact.WorkLogDoc`) and refreshes
+  `.lattice/state/REPO_MEMORY.md` plus agent-level `MEMORY.md` entries as part
+  of the down-cycle skills.
+- **Downstream signals** – Work-process restarts the orchestrator prompt with
+  the next cycle number, opens `bd` tickets for unrelated bugs logged during the
+  down-cycle, and guarantees `workflow/work/.complete` exists before release
+  starts. Refinement and release modules read the work log, per-agent summaries,
+  and `.refinement-needed` marker to plan audits or deploy artifacts.

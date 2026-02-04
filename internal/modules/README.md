@@ -27,6 +27,15 @@ substeps outlined in `.ai/MODULAR_WORKFLOW_PLAN.md`:
      folders, staged CV copies under `.lattice/setup/cvs/<community>/<name>/`,
      plus a `HIRE` epic in bd with per-agent beads tracking dossier authorship.
 10. `work_process` – Drive agents through execution
+    - Inputs: `.lattice/workflow/team/workers.json`,
+      `.lattice/workflow/orchestrator.json`, roster AGENT/MEMORY files, and a
+      ready bead queue in bd.
+    - Outputs:
+      `.lattice/workflow/work/{.in-progress,.complete,.refinement-needed}`
+      markers, `workflow/work/current-cycle.json`, per-agent worktrees under
+      `.lattice/worktree/<cycle>/`, agent/orchestrator summaries in
+      `.lattice/state/cycle-*/SUMMARY.md`, refreshed `state/REPO_MEMORY.md`, and
+      appended `workflow/work/work-log.md` entries.
 11. `refinement` – Handle post-work QA loops
 
 Each subdirectory contains a Go package reserved for the module. They only
