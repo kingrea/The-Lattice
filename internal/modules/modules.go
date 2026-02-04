@@ -2,6 +2,7 @@ package modules
 
 import (
 	"github.com/yourusername/lattice/internal/module"
+	"github.com/yourusername/lattice/internal/modules/action_plan"
 	"github.com/yourusername/lattice/internal/modules/anchor_docs"
 )
 
@@ -12,4 +13,5 @@ func RegisterBuiltins(reg *module.Registry) {
 		return
 	}
 	anchor_docs.Register(reg)
+	action_plan.Register(reg)
 }
