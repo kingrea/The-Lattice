@@ -50,6 +50,23 @@ substeps outlined in `.ai/MODULAR_WORKFLOW_PLAN.md`:
       opened from the audits, and refreshed `.in-progress`/`.complete` markers
       (plus removal of `.refinement-needed`). Audit synthesis also shells out to
       `bd create`, so the follow-up beads appear in the queue for release.
+12. `release` – Package artifacts, archive diagnostics, and land the commission
+    - Inputs: `workflow/work/.complete` (with `.refinement-needed` absent), the
+      latest work log, audit synthesis outputs, roster/orchestrator manifests,
+      and any release metadata from refinement. The module also inspects
+      `.lattice/state/cycle-*` summaries plus the bead queue to describe
+      deferred scope in the notes.
+    - Runtime deps: write access to `.lattice/workflow/release/`, the project
+      `logs/` and `worktree/` directories, the bd CLI, and permission to tear
+      down tmux/OpenCode sessions from prior phases. Config must expose
+      `Config.WorkerListPath()`, `Workflow.OrchestratorPath()`, and
+      `Config.AgentsDir()` so the module can archive + reset runtime state.
+    - Outputs: `workflow/release/RELEASE_NOTES.md` (with `_lattice` provenance),
+      timestamped bundles under `workflow/release/packages/` that capture
+      shipped artifacts/logs, and the `.agents-released`, `.cleanup-done`, and
+      `.orchestrator-released` markers. Release also writes archival copies of
+      the roster + work log and removes generated configs so the next commission
+      starts clean.
 
 Each subdirectory contains a Go package reserved for the module. They only
 expose a `doc.go` placeholder today so future patches can land actual logic

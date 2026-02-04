@@ -372,3 +372,35 @@ change. The policy is straightforward:
   finding, so new beads show up in the queue with provenance linking back to the
   audits. Manual review sessions can be spawned on demand, and their tmux window
   IDs are returned so Bubble Tea can surface cleanup controls.
+
+### Release module IO
+
+- **Inputs** – Release will not run until work-process has produced
+  `artifact.WorkCompleteMarker` and refinement cleared any
+  `artifact.RefinementNeededMarker`. It consumes the final work log
+  (`artifact.WorkLogDoc`), audit synthesis outputs (`artifact.AuditSynthesisDoc`
+  plus the surrounding `workflow/audit` directory), roster/orchestrator
+  manifests (`artifact.WorkersJSON`, `artifact.OrchestratorState`), stakeholder
+  assignments, per-cycle summaries in `.lattice/state/cycle-*/SUMMARY.md`, and
+  the outstanding bead queue via `bd ready --json` so the notes can highlight
+  deferred work.
+- **Configuration dependencies** – `ModuleContext.Config` must expose writable
+  release/logs/worktree directories, `AgentsDir()`, `WorkerListPath()`, and the
+  project root so generated opencode configs can be restored. The module also
+  needs permission to terminate tmux/OpenCode windows, delete worktrees, archive
+  logs, and issue bd queries. Operators can supply optional overrides through
+  the module config map (`notesTemplate`, `package.include` globs,
+  `skipTmuxCleanup`) to control how release notes are rendered and which files
+  land in the package.
+- **Outputs** – Release writes `workflow/release/RELEASE_NOTES.md` stamped with
+  `_lattice` metadata listing every shipped artifact, relevant commits, and the
+  beads that remain open. It snapshots deliverables, audits, logs, worktrees,
+  and roster/orchestrator manifests into timestamped folders (or tarballs) under
+  `workflow/release/packages/`, archives the outgoing `workers.json`, and emits
+  `.agents-released`, `.cleanup-done`, and `.orchestrator-released` markers so
+  the workflow engine can skip redundant work on resume.
+- **Post-run effects** – Generated agent dossiers, orchestrator configs, tmux
+  sessions, logs, and worktrees are cleaned up. Worker/orchestrator json files
+  are reset to empty payloads, ensuring the next commission begins from a clean
+  state while the `workflow/release/` folder stands as the authoritative release
+  record.
