@@ -197,6 +197,15 @@ var (
 	ReviewSimplifierDoc = register(newDocRef("review-simplifier", "Simplifier Review", "Expert review focused on DX and simplicity", func(wf *workflow.Workflow) string { return wf.ReviewSimplifierPath() }))
 	ReviewAdvocateDoc   = register(newDocRef("review-advocate", "User Advocate Review", "Expert review focused on user value", func(wf *workflow.Workflow) string { return wf.ReviewAdvocatePath() }))
 	ReviewSkepticDoc    = register(newDocRef("review-skeptic", "Skeptic Review", "Expert review stress-testing risks", func(wf *workflow.Workflow) string { return wf.ReviewSkepticPath() }))
+	StakeholdersJSON    = register(newJSONRef("stakeholders-json", "Stakeholders Manifest", "stakeholders.json describing refinement reviewer assignments", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.TeamDir(), "stakeholders.json")
+	}))
+	AuditDirectory = register(newDirectoryRef("audit-dir", "Audit Directory", "workflow/audit folder storing stakeholder audits", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.Dir(), "audit")
+	}))
+	AuditSynthesisDoc = register(newDocRef("audit-synthesis", "Audit Synthesis Summary", "SYNTHESIS.md summarizing stakeholder audits", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.Dir(), "audit", "SYNTHESIS.md")
+	}))
 
 	OrchestratorState    = register(newJSONRef("orchestrator-state", "Orchestrator State", "orchestrator.json describing current orchestrator configuration", func(wf *workflow.Workflow) string { return wf.OrchestratorPath() }))
 	WorkersJSON          = register(newJSONRef("workers-json", "Workers Roster", "workers.json with currently hired agents", func(wf *workflow.Workflow) string { return wf.WorkersPath() }))
