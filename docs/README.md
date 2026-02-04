@@ -5,6 +5,78 @@ an overview of how the planning, staffing, work, refinement, and release modules
 connect, then dive into the focused primers alongside it when you need deeper
 context.
 
+## Workflow Options
+
+### Choosing a workflow
+
+1. Launch `lattice` and highlight **Commission Work** on the home screen.
+2. Press _enter_ to open the workflow picker, then use ↑/↓ to highlight
+   `commission-work`, `quick-start`, `solo`, or any custom workflow that was
+   discovered from `.lattice/config.yaml`.
+3. Press _enter_ again to start the highlighted workflow. The picker writes your
+   decision back to `.lattice/config.yaml`, so the next run starts from the same
+   workflow unless you change it.
+
+The picker lives inside the TUI, so you can review ready/running/blocked modules
+before committing to a run. Selecting **Resume Work** from the main menu reloads
+the persisted engine snapshot and continues executing whichever workflow is
+stored on disk.
+
+### Pinning the default workflow
+
+Projects can pin (and optionally limit) workflows by editing
+`.lattice/config.yaml`:
+
+```yaml
+version: 1
+workflows:
+  default: solo # launch solo runs by default
+  available:
+    - commission-work
+    - quick-start
+    - solo
+```
+
+The runtime loads every workflow defined under `${LATTICE_ROOT}/workflows/` plus
+any project-scoped files under `<project>/workflows/`. Providing an `available`
+list hides everything else from the picker while still allowing power users to
+swap IDs manually by editing the config.
+
+### Built-in workflows at a glance
+
+| Workflow          | When to choose it                                                            | Module sequence                                                                                                                                                                         | Prerequisites                                                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `commission-work` | Full delivery cycle with persona reviews, consolidation, refinement, release | anchor-docs → action-plan → staff-review → staff-incorporate → parallel-reviews → consolidation → bead-creation → orchestrator-selection → hiring → work-process → refinement → release | Crew slots available for reviewer personas, tmux/OpenCode capacity for parallel runs, appetite for full gating before staffing |
+| `quick-start`     | Fast quotes + staffed cycle without persona fan-out                          | anchor-docs → action-plan → staff-review → bead-creation → orchestrator-selection → hiring → work-process → release                                                                     | Comfortable skipping consolidation/refinement; need at least one orchestrator + crew ready to staff immediately                |
+| `solo`            | Single operator wants planning + execution without hiring overhead           | anchor-docs → action-plan → solo-work → release                                                                                                                                         | Solo operator with `solo-work` module installed; no orchestration/hiring dependencies                                          |
+
+- `commission-work` is the safest path for high-risk or multi-stakeholder work.
+  It expects that persona reviewers, consolidation, refinement, and release all
+  run in a single engagement before beads can move downstream.
+- `quick-start` keeps anchor docs, action planning, staff review, staffing, and
+  release but skips the persona, consolidation, and refinement loops to reduce
+  turnaround time.
+- `solo` is the lightweight preset; `solo-work` produces work logs and release
+  markers without touching orchestrator-selection, hiring, or work-process
+  modules.
+
+### Creating custom workflows
+
+1. Copy an existing file in `workflows/` (or start from scratch) and set a new
+   `id`, `name`, and `description`.
+2. Declare the modules you need under `modules:` and wire dependencies via
+   `depends_on`. Optional `config` maps travel alongside each module and are
+   injected into the runtime at execution time.
+3. Place the file under `${LATTICE_ROOT}/workflows/` for a global preset or
+   inside your project at `workflows/<id>.yaml` so it lives with the repo.
+4. Either edit `.lattice/config.yaml` → `workflows.default: <id>` or select the
+   new ID once from the TUI picker. The picker automatically appends new IDs to
+   `workflows.available` after their first run.
+
+Custom workflows inherit the same resolver, scheduler, and artifact guarantees,
+so prerequisites (missing artifacts, invalid metadata, manual gates) are still
+enforced even when the graph diverges from the presets below.
+
 ## Module Pipeline
 
 The default `commission-work` workflow wires the following modules in order. The

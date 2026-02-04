@@ -80,25 +80,55 @@ with `engine.State` so retries and resumes see the same overrides.
 
 ### Workflow presets
 
-The repository now ships multiple workflow definitions so operators can choose
-an execution surface that matches the scope of their engagement:
+The workflow engine ships with presets so operators can select the level of
+process they need before launching modules. All presets are discoverable through
+the **Commission Work** picker inside the TUI: highlight the menu item, press
+_enter_, choose a workflow with ↑/↓, then press _enter_ again to launch it. The
+picker records your choice in `.lattice/config.yaml`, so the next run inherits
+the same default automatically.
 
-- `commission-work` – the long-form plan + review gauntlet that runs every
-  reviewer persona, consolidation, refinement, and release module. Use this when
-  you need every gating artifact before staffing.
-- `quick-start` – an abbreviated path for rapid engagements. It keeps the early
-  planning steps plus the staffing + release chain while skipping persona review
-  fan-out, consolidation, and refinement. The module order is:
+Pin a preset (or limit the visible list) with the project config:
+
+```yaml
+version: 1
+workflows:
+  default: quick-start
+  available:
+    - commission-work
+    - quick-start
+    - solo
+```
+
+Each workflow can also be invoked headlessly by pointing `module-runner` at the
+matching workflow definition under `${LATTICE_ROOT}/workflows/` or
+`<project>/workflows/`.
+
+- `commission-work` – Long-form plan + persona reviews + consolidation +
+  refinement before release. Sequence:
+  `anchor-docs → action-plan → staff-review → staff-incorporate → parallel-reviews → consolidation → bead-creation → orchestrator-selection → hiring → work-process → refinement → release`.
+  **When to use**: you have tmux/OpenCode capacity for reviewer personas and
+  want every gating artifact stamped before staffing or release.
+  **Prerequisites**: persona reviewers enabled, `opencode-worktree` installed so
+  parallel tmux sessions can launch, willingness to run refinement before
+  closing.
+- `quick-start` – Abbreviated cycle for rapid quotes with staffing + release.
+  Sequence:
   `anchor-docs → action-plan → staff-review → bead-creation → orchestrator-selection → hiring → work-process → release`.
-- `solo` – a low-headcount preset for single operators. It keeps the anchor-docs
-  and action-plan passes but replaces the staffing/work modules with
-  `solo-work`, which generates the work log plus completion markers so release
-  can run immediately. Module order:
-  `anchor-docs → action-plan → solo-work → release`.
+  **When to use**: teams that still need staffed cycles but want to skip persona
+  reviews, consolidation, and refinement to save time. **Prerequisites**:
+  orchestrator-selection and hiring modules must still be able to create
+  rosters; plan to run at least one work cycle and release.
+- `solo` – Lightweight preset for single operators. Sequence:
+  `anchor-docs → action-plan → solo-work → release`. **When to use**: one person
+  needs anchor docs + a plan before executing the work themselves.
+  **Prerequisites**: `solo-work` module registered, no hiring/orchestrator
+  dependencies required, release must be able to run immediately after the solo
+  log is written.
 
-Point `.lattice/config.yaml` → `workflows.default` at the desired ID. Both files
-live in `workflows/` and accept the same runtime overrides/metadata maps
-described above.
+Creating custom workflows follows the same YAML schema: define an `id`, list the
+modules with `depends_on` edges, drop the file under `workflows/`, and set
+`workflows.default` (or pick it in the TUI). The resolver enforces dependencies
+and prerequisites even when the graph differs from the presets above.
 
 ### Collaboration flow
 
