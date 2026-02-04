@@ -30,6 +30,23 @@ is registered through `internal/modules/modules.go`. Updating the workflow YAML
 is enough to change the pipeline order so the TUI, engine, and headless CLIs all
 see the same topology.
 
+For rapid engagements the repository also includes the `quick-start` workflow:
+
+| Order | Module ID                | Purpose                                                                |
+| ----- | ------------------------ | ---------------------------------------------------------------------- |
+| 1     | `anchor-docs`            | Capture the scope definition with COMMISSION/ARCHITECTURE/CONVENTIONS. |
+| 2     | `action-plan`            | Generate MODULES/PLAN directly from the anchor docs.                   |
+| 3     | `staff-review`           | Run a single staff pass for quality without persona fan-out.           |
+| 4     | `bead-creation`          | Convert the reviewed plan into beads for quick scheduling.             |
+| 5     | `orchestrator-selection` | Lock the orchestrator roster and refresh workflow/orchestrator.json.   |
+| 6     | `hiring`                 | Hire the workers and generate AGENT briefs for the scoped cycle.       |
+| 7     | `work-process`           | Run the work cycle through the orchestrator and log outputs.           |
+| 8     | `release`                | Package the deliverables and reset runtime directories.                |
+
+Point `.lattice/config.yaml` to `workflows.default: quick-start` when you need
+this abbreviated path; both workflows share the same runtime + resolver
+semantics.
+
 ## Running Modules
 
 ### Bubble Tea workflow view

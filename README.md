@@ -212,6 +212,19 @@ repository. Each definition lists the modules to run plus their dependencies.
 To customize the workflow, add additional YAML definitions under `workflows/`
 and point `.lattice/config.yaml` → `workflows.default` at the new ID.
 
+#### Built-in workflows
+
+| ID                | When to use it                                                              | Module path                                                                                                                                                                             |
+| ----------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commission-work` | Full delivery cycle with the complete review + refinement gauntlet          | anchor-docs → action-plan → staff-review → staff-incorporate → parallel-reviews → consolidation → bead-creation → orchestrator-selection → hiring → work-process → refinement → release |
+| `quick-start`     | Rapid engagements that still need staffing + release but skip extra reviews | anchor-docs → action-plan → staff-review → bead-creation → orchestrator-selection → hiring → work-process → release                                                                     |
+
+Set `.lattice/config.yaml` → `workflows.default: quick-start` when you need to
+spin up a short scoped effort without running the persona reviews,
+consolidation, or refinement modules. The workflow engine still enforces
+dependencies, so downstream staffing modules only unblock once the quick path
+produces the required artifacts.
+
 Every module entry in the YAML may include a `config` map. The keys/values are
 opaque to the runtime but they are passed straight into the module factory as a
 `module.Config`. Example:

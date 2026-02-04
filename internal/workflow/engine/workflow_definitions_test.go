@@ -9,8 +9,10 @@ import (
 	"github.com/yourusername/lattice/internal/workflow"
 )
 
+var workflowsDir = filepath.Join("..", "..", "..", "workflows")
+
 func TestCommissionWorkflowIncludesDeliveryModules(t *testing.T) {
-	def := loadCommissionWorkflowDefinition(t)
+	def := loadWorkflowDefinition(t, "commission-work")
 	want := []string{
 		"anchor-docs",
 		"action-plan",
@@ -41,7 +43,59 @@ func TestCommissionWorkflowIncludesDeliveryModules(t *testing.T) {
 }
 
 func TestCommissionWorkflowRunsToCompletionWithEngine(t *testing.T) {
-	def := loadCommissionWorkflowDefinition(t)
+	def := loadWorkflowDefinition(t, "commission-work")
+	runWorkflowToCompletion(t, def)
+}
+
+func TestQuickStartWorkflowIncludesRapidModules(t *testing.T) {
+	def := loadWorkflowDefinition(t, "quick-start")
+	want := []string{
+		"anchor-docs",
+		"action-plan",
+		"staff-review",
+		"bead-creation",
+		"orchestrator-selection",
+		"hiring",
+		"work-process",
+		"release",
+	}
+	if got := def.ModuleIDs(); !slices.Equal(got, want) {
+		t.Fatalf("quick-start module order mismatch\nwant %v\ngot  %v", want, got)
+	}
+	assertDependencies := func(id string, expected []string) {
+		if deps := def.Dependencies(id); !slices.Equal(deps, expected) {
+			t.Fatalf("%s dependencies mismatch\nwant %v\ngot  %v", id, expected, deps)
+		}
+	}
+	assertDependencies("action-plan", []string{"anchor-docs"})
+	assertDependencies("staff-review", []string{"action-plan"})
+	assertDependencies("bead-creation", []string{"staff-review"})
+	assertDependencies("orchestrator-selection", []string{"bead-creation"})
+	assertDependencies("hiring", []string{"orchestrator-selection"})
+	assertDependencies("work-process", []string{"hiring"})
+	assertDependencies("release", []string{"work-process"})
+	if def.Runtime.MaxParallel != 2 {
+		t.Fatalf("quick-start max_parallel mismatch: want 2, got %d", def.Runtime.MaxParallel)
+	}
+}
+
+func TestQuickStartWorkflowRunsToCompletionWithEngine(t *testing.T) {
+	def := loadWorkflowDefinition(t, "quick-start")
+	runWorkflowToCompletion(t, def)
+}
+
+func loadWorkflowDefinition(t *testing.T, id string) workflow.WorkflowDefinition {
+	t.Helper()
+	path := filepath.Join(workflowsDir, id+".yaml")
+	def, err := workflow.LoadDefinitionFile(path)
+	if err != nil {
+		t.Fatalf("load %s: %v", path, err)
+	}
+	return def
+}
+
+func runWorkflowToCompletion(t *testing.T, def workflow.WorkflowDefinition) {
+	t.Helper()
 	ctx := newTestModuleContext(t)
 	reg := module.NewRegistry()
 	stubs := map[string]*stubModule{}
@@ -82,14 +136,4 @@ func TestCommissionWorkflowRunsToCompletionWithEngine(t *testing.T) {
 	if state.Status != EngineStatusComplete {
 		t.Fatalf("expected engine complete, got %s", state.Status)
 	}
-}
-
-func loadCommissionWorkflowDefinition(t *testing.T) workflow.WorkflowDefinition {
-	t.Helper()
-	path := filepath.Join("..", "..", "..", "workflows", "commission-work.yaml")
-	def, err := workflow.LoadDefinitionFile(path)
-	if err != nil {
-		t.Fatalf("load %s: %v", path, err)
-	}
-	return def
 }

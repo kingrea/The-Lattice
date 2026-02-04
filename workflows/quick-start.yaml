@@ -1,0 +1,74 @@
+id: quick-start
+name: Quick Start
+description:
+  Rapid engagement workflow that trims review loops while keeping the
+  commissioning, staffing, and delivery milestones required to ship a cycle.
+metadata:
+  intent: rapid-engagement
+  recommended_use: Short scoped work where teams need a staffed cycle quickly
+  default_targets: release
+runtime:
+  max_parallel: 2
+
+modules:
+  - id: anchor-docs
+    module: anchor-docs
+    name: Capture Anchor Docs
+    description:
+      Establishes COMMISSION.md, ARCHITECTURE.md, and CONVENTIONS.md so
+      downstream modules inherit the same scope definition as the full workflow.
+
+  - id: action-plan
+    module: action-plan
+    name: Draft Action Plan
+    description:
+      Produces MODULES.md and PLAN.md directly from anchor docs for the light
+      planning path.
+    depends_on: [anchor-docs]
+
+  - id: staff-review
+    module: staff-review
+    name: Staff Engineer Review
+    description:
+      Runs the single staff review pass to keep plan quality high without the
+      multi-persona review cycle.
+    depends_on: [action-plan]
+
+  - id: bead-creation
+    module: bead-creation
+    name: Create Beads
+    description:
+      Converts the staff-reviewed plan into beads that can be scheduled rapidly.
+    depends_on: [staff-review]
+
+  - id: orchestrator-selection
+    module: orchestrator-selection
+    name: Select Orchestrator
+    description:
+      Locks in the orchestrator roster, writes workflow/orchestrator.json, and
+      snapshots workers.json so staffing can proceed immediately.
+    depends_on: [bead-creation]
+
+  - id: hiring
+    module: hiring
+    name: Hire Workers
+    description:
+      Builds the worker roster, generates AGENT briefs, and prepares support
+      packets for the rapid-cycle scope.
+    depends_on: [orchestrator-selection]
+
+  - id: work-process
+    module: work-process
+    name: Run Work Cycle
+    description:
+      Dispatches the planned cycle through the orchestrator and records work
+      logs so release can start as soon as the cycle winds down.
+    depends_on: [hiring]
+
+  - id: release
+    module: release
+    name: Finalize Release
+    description:
+      Packages artifacts, writes release notes, and resets runtime directories
+      to close out the quick engagement.
+    depends_on: [work-process]

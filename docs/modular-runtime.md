@@ -78,6 +78,23 @@ flags (bad files or malformed `key=value` pairs fail before modules run). Once a
 module is instantiated, the config map is immutable for the run and rides along
 with `engine.State` so retries and resumes see the same overrides.
 
+### Workflow presets
+
+The repository now ships multiple workflow definitions so operators can choose
+an execution surface that matches the scope of their engagement:
+
+- `commission-work` – the long-form plan + review gauntlet that runs every
+  reviewer persona, consolidation, refinement, and release module. Use this when
+  you need every gating artifact before staffing.
+- `quick-start` – an abbreviated path for rapid engagements. It keeps the early
+  planning steps plus the staffing + release chain while skipping persona review
+  fan-out, consolidation, and refinement. The module order is:
+  `anchor-docs → action-plan → staff-review → bead-creation → orchestrator-selection → hiring → work-process → release`.
+
+Point `.lattice/config.yaml` → `workflows.default` at the desired ID. Both files
+live in `workflows/` and accept the same runtime overrides/metadata maps
+described above.
+
 ### Collaboration flow
 
 1. Mode inspects workflow state (e.g., `MODULES.md` missing).
