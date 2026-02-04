@@ -100,6 +100,35 @@ about artifact invalidation details.
 This explicit split lets us evolve the runtime incrementally: we can convert one
 mode at a time to modules without blocking the rest of the CLI.
 
+### Workflow engine state machine
+
+The `internal/workflow/engine` package drives resolver + scheduler decisions and
+persists snapshots to `.lattice/workflow/engine/state.json`. Each snapshot
+includes the workflow definition, run identifier, module metadata, scheduler
+skips, runtime constraints (targets, batch size, manual gates, running IDs), and
+the last known module result.
+
+- `Start(def)` normalizes the workflow, refreshes module states, chooses
+  runnable nodes, and writes the first snapshot.
+- `Resume()` reloads persisted state after a restart and re-applies
+  `Resolver.Refresh` so artifact changes are reflected immediately.
+- `Update(results...)` merges module run results (completed, failed, needs
+  input) plus runtime overrides before recomputing runnable batches.
+
+The engine emits a coarse status for the UI:
+
+| Status     | Trigger                                                          |
+| ---------- | ---------------------------------------------------------------- |
+| `running`  | Runnable modules exist or modules are currently running          |
+| `blocked`  | No runnable modules, but pending/blocked nodes remain            |
+| `complete` | Every module resolved to `complete`                              |
+| `error`    | Resolver surfaced `NodeStateError` or a module run reported fail |
+
+Consumers can call `View()` to read the last snapshot or rely on
+`Start/Resume/ Update` to mutate state. Because snapshots store the normalised
+workflow definition, the engine can rebuild resolver/scheduler instances without
+the UI needing to stash additional context.
+
 ### Artifact metadata + versioning
 
 Every document artifact now receives a `lattice` YAML frontmatter block (JSON
