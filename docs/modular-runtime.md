@@ -260,3 +260,23 @@ change. The policy is straightforward:
 - Invalidation reasons include missing files, malformed metadata, module version
   drift, or fingerprint mismatches. Modules can react to these events to clean
   up derived artifacts or schedule dependent work.
+
+### Orchestrator-selection module IO
+
+- **Inputs** – The module may only run once the consolidation phase has stamped
+  `.lattice/action/MODULES.md` and `.lattice/action/PLAN.md` plus the
+  `.reviews-applied` and `.beads-created` markers. These artifacts prove the
+  plan is final and beads exist for quoting downstream work.
+- **Configuration dependencies** – `ModuleContext.Config` must reference an
+  initialized `.lattice` tree so `Config.CommunitiesDir()` finds installed
+  communities and their `cvs/**/cv.md` files. The module regenerates the
+  orchestrator’s AGENT.md beneath `.lattice/agents/orchestrator/` and rewrites
+  `opencode.jsonc`, so those directories must be writable.
+- **Outputs** – `artifact.OrchestratorState`
+  (`.lattice/workflow/orchestrator.json`) capturing the selected denizen’s
+  `name`, `community`, and `cvPath` alongside a `_lattice` metadata block
+  stamped with `module: orchestrator-selection`, the module version, workflow
+  identifier, and `inputs` referencing `modules-doc`, `action-plan`,
+  `reviews-applied`, and `beads-created`. The module also updates
+  `artifact.WorkersJSON` (`workflow/team/workers.json`) so hiring can see the
+  orchestrator roster entry with matching provenance.

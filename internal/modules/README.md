@@ -12,6 +12,11 @@ substeps outlined in `.ai/MODULAR_WORKFLOW_PLAN.md`:
 6. `consolidation` – Merge reviewer feedback and emit `.reviews-applied`
 7. `bead_creation` – Create beads + `.beads-created` marker
 8. `orchestrator_selection` – Choose orchestrator + populate orchestrator.json
+   - Inputs: consolidation-stamped MODULES.md/PLAN.md plus `.reviews-applied`
+     and `.beads-created` markers.
+   - Outputs: `.lattice/workflow/orchestrator.json` (with `_lattice` metadata)
+     and an updated `workflow/team/workers.json` referencing the selected
+     denizen.
 9. `hiring` – Build workers.json + agent folders
 10. `work_process` – Drive agents through execution
 11. `refinement` – Handle post-work QA loops
