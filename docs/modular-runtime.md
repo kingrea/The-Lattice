@@ -293,17 +293,18 @@ change. The policy is straightforward:
   `ModuleContext.Orchestrator` capable of `LoadDenizenCVs()` so it can enumerate
   denizens from `<LATTICE_ROOT>/communities/*/cvs/**`. `ModuleContext.Config`
   must expose writable `AgentsDir()` and `WorkerListPath()` locations because
-  the module rewrites `.lattice/agents/{workers,specialists}/<slug>/AGENT.md`
-  files alongside `workflow/team/workers.json`. Hiring shells out to `tmux`,
+  the module rewrites
+  `.lattice/agents/{workers,specialists}/<slug>/{AGENT,AGENT_SUP}.md` files
+  alongside `workflow/team/workers.json`. Hiring shells out to `tmux`,
   `opencode`, and `skills.Ensure` to run the bundled `create-agent-file` skill
   for each hire, and it shells out to `bd ready --json` plus repeated
   `bd create` commands to size the workload and mint follow-up beads.
 - **Outputs** – At minimum the module writes `artifact.WorkersJSON`
   (`workflow/team/workers.json`) populated with worker/specialist entries,
   capacities, `isSpark` flags, and `_lattice` provenance metadata referencing
-  the artifacts above. It also generates AGENT.md dossiers beneath
-  `.lattice/agents/`, staging source CVs into
-  `.lattice/setup/cvs/<community>/<name>/` before invoking the skill.
-  Additionally an epic titled `HIRE` and one bead per agent are created in bd so
-  subsequent modules (work-process, refinement) can trace AGENT.md creation
-  tasks.
+  the artifacts above. It also generates dual dossiers (`AGENT.md` for the
+  worker and `AGENT_SUP.md` for supervisors) beneath `.lattice/agents/`, staging
+  source CVs into `.lattice/setup/cvs/<community>/<name>/` before invoking the
+  skill. Additionally an epic titled `HIRE` and one bead per agent are created
+  in bd so subsequent modules (work-process, refinement) can trace AGENT brief
+  creation tasks.

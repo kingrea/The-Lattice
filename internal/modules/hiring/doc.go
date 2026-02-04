@@ -34,9 +34,10 @@ package hiring
 //     version, workflow identifier, and the inputs listed above so downstream
 //     modules can reason about provenance.
 //   - Agent dossiers inside `.lattice/agents/`. For each worker the module writes
-//     `agents/workers/<slug>/AGENT.md`; specialists render to
-//     `agents/specialists/<slug>/AGENT.md`. SPARK hires receive stub documents,
-//     while non-SPARK hires run the `create-agent-file` skill with staged CVs in
+//     `agents/workers/<slug>/AGENT.md` plus a companion `AGENT_SUP.md` support
+//     packet; specialists render to `agents/specialists/<slug>/{AGENT,AGENT_SUP}.md`.
+//     SPARK hires receive stub documents, while non-SPARK hires run the
+//     `create-agent-file` skill with staged CVs in
 //     `.lattice/setup/cvs/<community>/<name>/`.
 //
 // Side effects consumed later:
