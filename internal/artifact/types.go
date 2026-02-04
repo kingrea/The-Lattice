@@ -224,4 +224,20 @@ var (
 	ReviewsAppliedMarker = register(newMarkerRef("reviews-applied", "Reviews Applied Marker", "Marker file set when review feedback was incorporated", func(wf *workflow.Workflow) string { return wf.ReviewsAppliedPath() }))
 	StaffFeedbackApplied = register(newMarkerRef("staff-feedback-applied", "Staff Feedback Applied Marker", "Marker after staff feedback incorporation", func(wf *workflow.Workflow) string { return wf.StaffFeedbackAppliedPath() }))
 	BeadsCreatedMarker   = register(newMarkerRef("beads-created", "Beads Created Marker", "Marker created after beads are generated", func(wf *workflow.Workflow) string { return wf.BeadsCreatedPath() }))
+
+	ReleaseNotesDoc = register(newDocRef("release-notes", "Release Notes", "RELEASE_NOTES.md summarizing shipped work", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.ReleaseDir(), "RELEASE_NOTES.md")
+	}))
+	ReleasePackagesDir = register(newDirectoryRef("release-packages", "Release Packages Directory", "workflow/release/packages folder storing archived bundles", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.ReleaseDir(), "packages")
+	}))
+	AgentsReleasedMarker = register(newMarkerRef("agents-released", "Agents Released Marker", "Marker created when worker agents are released", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.ReleaseDir(), workflow.MarkerAgentsReleased)
+	}))
+	CleanupDoneMarker = register(newMarkerRef("cleanup-done", "Cleanup Done Marker", "Marker created after post-work cleanup completes", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.ReleaseDir(), workflow.MarkerCleanupDone)
+	}))
+	OrchestratorReleasedMarker = register(newMarkerRef("orchestrator-released", "Orchestrator Released Marker", "Marker created when orchestrator cleanup is finished", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.ReleaseDir(), workflow.MarkerOrchestratorReleased)
+	}))
 )

@@ -10,6 +10,7 @@ import (
 	"github.com/yourusername/lattice/internal/modules/orchestrator_selection"
 	"github.com/yourusername/lattice/internal/modules/parallel_reviews"
 	"github.com/yourusername/lattice/internal/modules/refinement"
+	"github.com/yourusername/lattice/internal/modules/release"
 	"github.com/yourusername/lattice/internal/modules/staff_incorporate"
 	"github.com/yourusername/lattice/internal/modules/staff_review"
 	"github.com/yourusername/lattice/internal/modules/work_process"
@@ -28,6 +29,7 @@ func RegisterBuiltins(reg *module.Registry) {
 	orchestrator_selection.Register(reg)
 	parallel_reviews.Register(reg)
 	refinement.Register(reg)
+	release.Register(reg)
 	hiring.Register(reg)
 	staff_incorporate.Register(reg)
 	staff_review.Register(reg)
