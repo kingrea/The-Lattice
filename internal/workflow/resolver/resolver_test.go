@@ -47,6 +47,39 @@ func TestResolverRefreshSetsStates(t *testing.T) {
 	}
 }
 
+func TestResolverReadyPreservesDeclarationOrder(t *testing.T) {
+	stubs := map[string]*stubModule{
+		"plan":  newStubModule("plan", true, nil),
+		"build": newStubModule("build", false, nil),
+		"docs":  newStubModule("docs", false, nil),
+	}
+	def := workflow.WorkflowDefinition{
+		ID: "fanout-workflow",
+		Modules: []workflow.ModuleRef{
+			{ID: "anchor-plan", ModuleID: "plan"},
+			{ID: "module-build", ModuleID: "build", DependsOn: []string{"anchor-plan"}},
+			{ID: "module-docs", ModuleID: "docs", DependsOn: []string{"anchor-plan"}},
+		},
+	}
+	res := buildResolverWithDefinition(t, stubs, def)
+	ctx := newTestModuleContext(t)
+
+	if err := res.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	ready := res.Ready()
+	if len(ready) != 2 {
+		t.Fatalf("expected two ready modules, got %d", len(ready))
+	}
+	if ready[0].ID != "module-build" || ready[1].ID != "module-docs" {
+		t.Fatalf("ready order mismatch: %+v", ready)
+	}
+	if ready[0].Ref.DependsOn[0] != "anchor-plan" || ready[1].Ref.DependsOn[0] != "anchor-plan" {
+		t.Fatalf("unexpected dependencies in ready nodes: %+v", ready)
+	}
+}
+
 func TestResolverQueueTargetsOrdersDependencies(t *testing.T) {
 	stubs := map[string]*stubModule{
 		"plan":   newStubModule("plan", false, nil),
@@ -98,6 +131,41 @@ func TestResolverRefreshPropagatesErrors(t *testing.T) {
 	}
 	if len(deploy.BlockedBy) != 1 || deploy.BlockedBy[0] != "module-build" {
 		t.Fatalf("unexpected deploy blockers: %+v", deploy.BlockedBy)
+	}
+}
+
+func TestResolverCyclicDependenciesRemainBlocked(t *testing.T) {
+	stubs := map[string]*stubModule{
+		"alpha": newStubModule("alpha", false, nil),
+		"beta":  newStubModule("beta", false, nil),
+	}
+	def := workflow.WorkflowDefinition{
+		ID: "cyclic-workflow",
+		Modules: []workflow.ModuleRef{
+			{ID: "module-alpha", ModuleID: "alpha", DependsOn: []string{"module-beta"}},
+			{ID: "module-beta", ModuleID: "beta", DependsOn: []string{"module-alpha"}},
+		},
+	}
+	res := buildResolverWithDefinition(t, stubs, def)
+	ctx := newTestModuleContext(t)
+
+	if err := res.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	alpha := mustNode(t, res, "module-alpha")
+	beta := mustNode(t, res, "module-beta")
+	if alpha.State != NodeStateBlocked || beta.State != NodeStateBlocked {
+		t.Fatalf("expected both nodes blocked, got %s/%s", alpha.State, beta.State)
+	}
+	if len(alpha.BlockedBy) != 1 || alpha.BlockedBy[0] != "module-beta" {
+		t.Fatalf("alpha blockers: %+v", alpha.BlockedBy)
+	}
+	if len(beta.BlockedBy) != 1 || beta.BlockedBy[0] != "module-alpha" {
+		t.Fatalf("beta blockers: %+v", beta.BlockedBy)
+	}
+	if ready := res.Ready(); len(ready) != 0 {
+		t.Fatalf("expected no ready modules, got %+v", ready)
 	}
 }
 
@@ -182,7 +250,45 @@ func TestResolverCheckArtifactFingerprintMismatch(t *testing.T) {
 	}
 }
 
+func TestResolverRefreshPropagatesFingerprintErrors(t *testing.T) {
+	stubs := map[string]*stubModule{
+		"plan":   newStubModule("plan", true, nil),
+		"build":  newStubModule("build", false, nil),
+		"deploy": newStubModule("deploy", false, nil),
+	}
+	stubs["plan"].fingerprintErr = errors.New("fingerprint boom")
+	res := buildResolver(t, stubs)
+	ctx := newTestModuleContext(t)
+
+	if err := res.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	plan := mustNode(t, res, "anchor-plan")
+	if plan.State != NodeStateError {
+		t.Fatalf("expected plan error state, got %s", plan.State)
+	}
+	if plan.Err == nil || plan.Err.Error() != "workflow: fingerprints for anchor-plan: fingerprint boom" {
+		t.Fatalf("unexpected plan fingerprint error: %v", plan.Err)
+	}
+	build := mustNode(t, res, "module-build")
+	if build.State != NodeStateBlocked {
+		t.Fatalf("expected build blocked by fingerprint error, got %s", build.State)
+	}
+}
+
 func buildResolver(t *testing.T, stubs map[string]*stubModule) *Resolver {
+	def := workflow.WorkflowDefinition{
+		ID: "test-workflow",
+		Modules: []workflow.ModuleRef{
+			{ID: "anchor-plan", ModuleID: "plan"},
+			{ID: "module-build", ModuleID: "build", DependsOn: []string{"anchor-plan"}},
+			{ID: "module-deploy", ModuleID: "deploy", DependsOn: []string{"module-build"}},
+		},
+	}
+	return buildResolverWithDefinition(t, stubs, def)
+}
+
+func buildResolverWithDefinition(t *testing.T, stubs map[string]*stubModule, def workflow.WorkflowDefinition) *Resolver {
 	t.Helper()
 	reg := module.NewRegistry()
 	for id, stub := range stubs {
@@ -191,14 +297,6 @@ func buildResolver(t *testing.T, stubs map[string]*stubModule) *Resolver {
 		reg.MustRegister(id, func(module.Config) (module.Module, error) {
 			return stub, nil
 		})
-	}
-	def := workflow.WorkflowDefinition{
-		ID: "test-workflow",
-		Modules: []workflow.ModuleRef{
-			{ID: "anchor-plan", ModuleID: "plan"},
-			{ID: "module-build", ModuleID: "build", DependsOn: []string{"anchor-plan"}},
-			{ID: "module-deploy", ModuleID: "deploy", DependsOn: []string{"module-build"}},
-		},
 	}
 	resolver, err := New(def, reg)
 	if err != nil {
@@ -229,12 +327,13 @@ func mustNode(t *testing.T, resolver *Resolver, id string) *Node {
 }
 
 type stubModule struct {
-	info          module.Info
-	complete      bool
-	err           error
-	outputs       []artifact.ArtifactRef
-	fingerprints  map[string]string
-	invalidations []module.ArtifactInvalidation
+	info           module.Info
+	complete       bool
+	err            error
+	outputs        []artifact.ArtifactRef
+	fingerprints   map[string]string
+	fingerprintErr error
+	invalidations  []module.ArtifactInvalidation
 }
 
 func newStubModule(id string, complete bool, err error) *stubModule {
@@ -278,6 +377,9 @@ func (m *stubModule) Run(*module.ModuleContext) (module.Result, error) {
 }
 
 func (m *stubModule) ArtifactFingerprints(*module.ModuleContext) (map[string]string, error) {
+	if m.fingerprintErr != nil {
+		return nil, m.fingerprintErr
+	}
 	if len(m.fingerprints) == 0 {
 		return nil, nil
 	}

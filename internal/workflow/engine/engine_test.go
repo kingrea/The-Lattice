@@ -12,6 +12,7 @@ import (
 	"github.com/yourusername/lattice/internal/module"
 	"github.com/yourusername/lattice/internal/workflow"
 	"github.com/yourusername/lattice/internal/workflow/resolver"
+	"github.com/yourusername/lattice/internal/workflow/scheduler"
 )
 
 func TestEngineStartPersistsState(t *testing.T) {
@@ -190,6 +191,116 @@ func TestEngineClaimAndReleaseRespectsParallelism(t *testing.T) {
 	}
 	if len(state.Runtime.Running) != 0 {
 		t.Fatalf("expected running set empty after failure, got %+v", state.Runtime.Running)
+	}
+}
+
+func TestEngineClaimFiltersRequestedModules(t *testing.T) {
+	ctx := newTestModuleContext(t)
+	def := workflow.WorkflowDefinition{
+		ID: "fanout-workflow",
+		Modules: []workflow.ModuleRef{
+			{ID: "anchor-plan", ModuleID: "plan"},
+			{ID: "module-build", ModuleID: "build", DependsOn: []string{"anchor-plan"}},
+			{ID: "module-docs", ModuleID: "docs", DependsOn: []string{"anchor-plan"}},
+		},
+	}
+	stubs := map[string]*stubModule{
+		"plan":  newStubModule("plan"),
+		"build": newStubModule("build"),
+		"docs":  newStubModule("docs"),
+	}
+	stubs["plan"].setComplete(true)
+	eng, repo := newCustomEngine(t, ctx, def, stubs)
+	if _, err := eng.Start(ctx, StartRequest{Definition: def}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	claim, err := eng.Claim(ctx, ClaimRequest{Modules: []string{"module-docs"}, Limit: 2})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if len(claim.Claims) != 1 || claim.Claims[0].ID != "module-docs" {
+		t.Fatalf("expected single docs claim, got %+v", claim.Claims)
+	}
+	if len(claim.State.Runtime.Running) != 1 || claim.State.Runtime.Running[0] != "module-docs" {
+		t.Fatalf("running set mismatch: %+v", claim.State.Runtime.Running)
+	}
+	if len(claim.State.Runnable) != 1 || claim.State.Runnable[0] != "module-build" {
+		t.Fatalf("expected build to remain runnable, got %+v", claim.State.Runnable)
+	}
+	stored, err := repo.Load()
+	if err != nil {
+		t.Fatalf("load repo: %v", err)
+	}
+	if len(stored.Runtime.Running) != 1 || stored.Runtime.Running[0] != "module-docs" {
+		t.Fatalf("persisted running set mismatch: %+v", stored.Runtime.Running)
+	}
+}
+
+func TestEngineManualGateRequiresApproval(t *testing.T) {
+	eng, _, ctx, stubs, def := newEngineHarness(t)
+	stubs["plan"].setComplete(true)
+	gate := map[string]scheduler.ManualGateState{
+		"module-build": {Required: true, Approved: false, Note: "needs approval"},
+	}
+	state, err := eng.Start(ctx, StartRequest{Definition: def, Runtime: &RuntimeOverrides{ManualGates: &gate}})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if len(state.Runnable) != 0 {
+		t.Fatalf("expected no runnable modules while gate pending, got %+v", state.Runnable)
+	}
+	reason, ok := state.Skipped["module-build"]
+	if !ok || reason.Reason != scheduler.SkipReasonManualGate {
+		t.Fatalf("expected manual gate skip, got %+v", state.Skipped)
+	}
+	approved := map[string]scheduler.ManualGateState{
+		"module-build": {Required: true, Approved: true},
+	}
+	state, err = eng.Update(ctx, UpdateRequest{Runtime: &RuntimeOverrides{ManualGates: &approved}})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if len(state.Runnable) != 1 || state.Runnable[0] != "module-build" {
+		t.Fatalf("expected build runnable after approval, got %+v", state.Runnable)
+	}
+	if _, blocked := state.Skipped["module-build"]; blocked {
+		t.Fatalf("expected manual gate cleared, got skips: %+v", state.Skipped)
+	}
+}
+
+func TestEngineResumeHonorsTargetOverrides(t *testing.T) {
+	eng, repo, ctx, stubs, def := newEngineHarness(t)
+	stubs["plan"].setComplete(true)
+	if _, err := eng.Start(ctx, StartRequest{Definition: def}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stubs["build"].setComplete(true)
+	targets := []string{"module-deploy"}
+	batchSize := 1
+	maxParallel := 1
+	state, err := eng.Resume(ctx, ResumeRequest{Runtime: &RuntimeOverrides{
+		Targets:     &targets,
+		BatchSize:   &batchSize,
+		MaxParallel: &maxParallel,
+	}})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if len(state.Runnable) != 1 || state.Runnable[0] != "module-deploy" {
+		t.Fatalf("expected deploy runnable, got %+v", state.Runnable)
+	}
+	if len(state.Runtime.Targets) != 1 || state.Runtime.Targets[0] != "module-deploy" {
+		t.Fatalf("expected targets persisted, got %+v", state.Runtime.Targets)
+	}
+	if state.Runtime.BatchSize != 1 || state.Runtime.MaxParallel != 1 {
+		t.Fatalf("runtime overrides missing: %+v", state.Runtime)
+	}
+	stored, err := repo.Load()
+	if err != nil {
+		t.Fatalf("load repo: %v", err)
+	}
+	if len(stored.Runtime.Targets) != 1 || stored.Runtime.Targets[0] != "module-deploy" {
+		t.Fatalf("persisted targets mismatch: %+v", stored.Runtime.Targets)
 	}
 }
 
