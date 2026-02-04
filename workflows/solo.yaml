@@ -1,0 +1,43 @@
+id: solo
+name: Solo Delivery
+description:
+  Single-operator workflow that keeps the anchor planning passes and jumps
+  straight into execution without hiring or orchestrator fan-out.
+metadata:
+  intent: solo-delivery
+  recommended_use: Individuals running scoped delivery cycles without a crew
+  default_targets: release
+runtime:
+  max_parallel: 1
+
+modules:
+  - id: anchor-docs
+    module: anchor-docs
+    name: Capture Anchor Docs
+    description:
+      Establish COMMISSION.md, ARCHITECTURE.md, and CONVENTIONS.md so the solo
+      run starts from the same scope definition as multi-operator workflows.
+
+  - id: action-plan
+    module: action-plan
+    name: Draft Action Plan
+    description:
+      Produce MODULES.md and PLAN.md from the anchor docs to direct the solo
+      work.
+    depends_on: [anchor-docs]
+
+  - id: solo-work
+    module: solo-work
+    name: Execute Solo Tasks
+    description:
+      Guides a single operator through executing the plan, emits the work log,
+      and synthesizes the completion markers that release expects.
+    depends_on: [action-plan]
+
+  - id: release
+    module: release
+    name: Finalize Release
+    description:
+      Packages artifacts and closes the workflow once the solo run logs
+      completion.
+    depends_on: [solo-work]

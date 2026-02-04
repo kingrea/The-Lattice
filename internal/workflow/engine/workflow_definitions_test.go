@@ -84,6 +84,35 @@ func TestQuickStartWorkflowRunsToCompletionWithEngine(t *testing.T) {
 	runWorkflowToCompletion(t, def)
 }
 
+func TestSoloWorkflowIncludesSingleOperatorModules(t *testing.T) {
+	def := loadWorkflowDefinition(t, "solo")
+	want := []string{
+		"anchor-docs",
+		"action-plan",
+		"solo-work",
+		"release",
+	}
+	if got := def.ModuleIDs(); !slices.Equal(got, want) {
+		t.Fatalf("solo module order mismatch\nwant %v\ngot  %v", want, got)
+	}
+	assertDependencies := func(id string, expected []string) {
+		if deps := def.Dependencies(id); !slices.Equal(deps, expected) {
+			t.Fatalf("%s dependencies mismatch\nwant %v\ngot  %v", id, expected, deps)
+		}
+	}
+	assertDependencies("action-plan", []string{"anchor-docs"})
+	assertDependencies("solo-work", []string{"action-plan"})
+	assertDependencies("release", []string{"solo-work"})
+	if def.Runtime.MaxParallel != 1 {
+		t.Fatalf("solo max_parallel mismatch: want 1, got %d", def.Runtime.MaxParallel)
+	}
+}
+
+func TestSoloWorkflowRunsToCompletionWithEngine(t *testing.T) {
+	def := loadWorkflowDefinition(t, "solo")
+	runWorkflowToCompletion(t, def)
+}
+
 func loadWorkflowDefinition(t *testing.T, id string) workflow.WorkflowDefinition {
 	t.Helper()
 	path := filepath.Join(workflowsDir, id+".yaml")

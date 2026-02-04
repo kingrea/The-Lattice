@@ -47,6 +47,19 @@ Point `.lattice/config.yaml` to `workflows.default: quick-start` when you need
 this abbreviated path; both workflows share the same runtime + resolver
 semantics.
 
+For solo operators there is a dedicated `solo` workflow:
+
+| Order | Module ID     | Purpose                                                                                               |
+| ----- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| 1     | `anchor-docs` | Establish the three anchor docs so the solo run has the same intake context as larger workflows.      |
+| 2     | `action-plan` | Generate MODULES/PLAN to outline the solo execution steps.                                            |
+| 3     | `solo-work`   | Create the solo execution log, synthesize the worker/orchestrator metadata, and mark work completion. |
+| 4     | `release`     | Package artifacts and close the workflow immediately after the solo log marks completion.             |
+
+Set `.lattice/config.yaml` to `workflows.default: solo` when one operator needs
+the anchor docs, plan, and release cadence without going through hiring or the
+work-process orchestrator loop.
+
 ## Running Modules
 
 ### Bubble Tea workflow view

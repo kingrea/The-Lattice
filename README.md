@@ -218,12 +218,19 @@ and point `.lattice/config.yaml` → `workflows.default` at the new ID.
 | ----------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `commission-work` | Full delivery cycle with the complete review + refinement gauntlet          | anchor-docs → action-plan → staff-review → staff-incorporate → parallel-reviews → consolidation → bead-creation → orchestrator-selection → hiring → work-process → refinement → release |
 | `quick-start`     | Rapid engagements that still need staffing + release but skip extra reviews | anchor-docs → action-plan → staff-review → bead-creation → orchestrator-selection → hiring → work-process → release                                                                     |
+| `solo`            | Single operators who want anchor docs → execution without staffing overhead | anchor-docs → action-plan → solo-work → release                                                                                                                                         |
 
 Set `.lattice/config.yaml` → `workflows.default: quick-start` when you need to
 spin up a short scoped effort without running the persona reviews,
 consolidation, or refinement modules. The workflow engine still enforces
 dependencies, so downstream staffing modules only unblock once the quick path
 produces the required artifacts.
+
+For low-headcount work flip the same setting to `workflows.default: solo`. The
+solo path keeps the anchor docs + planning steps but swaps the staffing/work
+process block for the new `solo-work` module that seeds `workers.json` with a
+single operator, emits a work log template, and raises the markers required for
+release to run immediately after the plan is executed.
 
 Every module entry in the YAML may include a `config` map. The keys/values are
 opaque to the runtime but they are passed straight into the module factory as a

@@ -90,6 +90,11 @@ an execution surface that matches the scope of their engagement:
   planning steps plus the staffing + release chain while skipping persona review
   fan-out, consolidation, and refinement. The module order is:
   `anchor-docs → action-plan → staff-review → bead-creation → orchestrator-selection → hiring → work-process → release`.
+- `solo` – a low-headcount preset for single operators. It keeps the anchor-docs
+  and action-plan passes but replaces the staffing/work modules with
+  `solo-work`, which generates the work log plus completion markers so release
+  can run immediately. Module order:
+  `anchor-docs → action-plan → solo-work → release`.
 
 Point `.lattice/config.yaml` → `workflows.default` at the desired ID. Both files
 live in `workflows/` and accept the same runtime overrides/metadata maps
