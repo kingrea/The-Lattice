@@ -155,6 +155,24 @@ export LATTICE_ROOT="/path/to/lattice"
 
 Without this variable, the CLI will fail to find required assets.
 
+### Workflow Definitions
+
+Workflows are now driven by the workflow engine. The TUI loads YAML definitions
+from `<project>/workflows/` or from `${LATTICE_ROOT}/workflows/`. The default
+`commission-work` definition lives in `workflows/commission-work.yaml` in this
+repository. Each definition lists the modules to run plus their dependencies.
+
+- Selecting **Commission Work** starts a fresh engine run using the configured
+  workflow definition.
+- Selecting **Resume Work** calls the engine's resume path so it can refresh the
+  dependency graph from disk.
+- The workflow pane shows ready modules, running modules, and manual gate
+  status. Use the inline key bindings to run modules, approve manual gates, or
+  skip optional nodes.
+
+To customize the workflow, add additional YAML definitions under `workflows/`
+and point `.lattice/config.yaml` → `workflows.default` at the new ID.
+
 ## Customization
 
 ### Changing the OpenCode command

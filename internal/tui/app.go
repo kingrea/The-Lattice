@@ -24,15 +24,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/yourusername/lattice/internal/config"
 	"github.com/yourusername/lattice/internal/logbook"
-	"github.com/yourusername/lattice/internal/modes"
-	"github.com/yourusername/lattice/internal/modes/agent_release"
-	"github.com/yourusername/lattice/internal/modes/hiring"
-	"github.com/yourusername/lattice/internal/modes/orchestrator_release"
-	"github.com/yourusername/lattice/internal/modes/orchestrator_selection"
-	"github.com/yourusername/lattice/internal/modes/planning"
-	"github.com/yourusername/lattice/internal/modes/refinement"
-	"github.com/yourusername/lattice/internal/modes/work_cleanup"
-	"github.com/yourusername/lattice/internal/modes/work_process"
+	"github.com/yourusername/lattice/internal/module"
 	"github.com/yourusername/lattice/internal/orchestrator"
 	"github.com/yourusername/lattice/internal/workflow"
 )
@@ -51,6 +43,30 @@ const (
 	statusWindowName     = "status"
 	statusReturnHotkey   = "M-s"
 )
+
+// WorkflowDefinitionLoader resolves workflow definitions for the engine-backed view.
+type WorkflowDefinitionLoader func(cfg *config.Config, workflowID string) (workflow.WorkflowDefinition, error)
+
+// AppOption customizes App construction for tests and alternate runtimes.
+type AppOption func(*App)
+
+// WithWorkflowDefinitionLoader overrides the workflow definition loader used by the TUI.
+func WithWorkflowDefinitionLoader(loader WorkflowDefinitionLoader) AppOption {
+	return func(a *App) {
+		if loader != nil {
+			a.workflowLoader = loader
+		}
+	}
+}
+
+// WithModuleRegistryFactory allows tests to inject custom module registries.
+func WithModuleRegistryFactory(factory func() *module.Registry) AppOption {
+	return func(a *App) {
+		if factory != nil {
+			a.registryFactory = factory
+		}
+	}
+}
 
 var phaseOrder = []workflow.Phase{
 	workflow.PhasePlanning,
@@ -107,9 +123,9 @@ type App struct {
 	workflow     *workflow.Workflow
 	logbook      *logbook.Logbook
 
-	// Active mode when in stateCommissionWork
-	activeMode modes.Mode
-	modeCtx    *modes.ModeContext
+	workflowLoader  WorkflowDefinitionLoader
+	registryFactory func() *module.Registry
+	workflowView    *workflowView
 
 	// UI components
 	mainMenu      list.Model // The main menu list
@@ -145,7 +161,7 @@ func (i menuItem) Description() string { return i.desc }
 func (i menuItem) FilterValue() string { return i.title }
 
 // NewApp creates a new App instance
-func NewApp(projectDir string) (*App, error) {
+func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 	cfg, err := config.NewConfig(projectDir)
 	if err != nil {
 		return nil, err
@@ -173,16 +189,17 @@ func NewApp(projectDir string) (*App, error) {
 		orchestrator:     orch,
 		workflow:         wf,
 		logbook:          lb,
+		workflowLoader:   defaultWorkflowLoader,
+		registryFactory:  defaultModuleRegistryFactory,
 		mainMenu:         mainMenu,
 		boardFocus:       focusMenu,
 		statusWindowName: statusWindowName,
 		statusReturnKey:  statusReturnHotkey,
-		modeCtx: &modes.ModeContext{
-			Config:       cfg,
-			Workflow:     wf,
-			Orchestrator: orch,
-			Logbook:      lb,
-		},
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(app)
+		}
 	}
 	if session, windowIdx, err := detectTmuxContext(); err == nil {
 		app.tmuxSession = session
@@ -266,10 +283,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.mainMenu.SetSize(max(0, msg.Width-6), max(0, msg.Height-10))
-		if a.state == stateCommissionWork && a.activeMode != nil {
-			newMode, cmd := a.activeMode.Update(msg)
-			a.activeMode = newMode
-			return a, cmd
+		if a.state == stateCommissionWork && a.workflowView != nil {
+			return a, a.workflowView.Update(msg)
 		}
 		return a, nil
 
@@ -344,28 +359,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case modes.ModeCompleteMsg:
-		if msg.Error != nil {
-			a.statusMsg = fmt.Sprintf("Error: %v", msg.Error)
-			a.logError("Mode completed with error: %v", msg.Error)
-			return a.returnToMainMenu()
-		}
-		if a.activeMode != nil {
-			a.logInfo("%s complete · advancing to %s", a.activeMode.Name(), msg.NextPhase.FriendlyName())
-		} else {
-			a.logInfo("Advancing to %s", msg.NextPhase.FriendlyName())
-		}
-		return a.advanceToPhase(msg.NextPhase)
-
-	case modes.ModeErrorMsg:
-		a.statusMsg = fmt.Sprintf("Error: %v", msg.Error)
-		a.logError("Mode error: %v", msg.Error)
-		return a.returnToMainMenu()
-
-	case modes.ModeProgressMsg:
-		a.statusMsg = msg.Status
-		a.logProgress(msg.Status)
-		return a, nil
 	}
 
 	var cmds []tea.Cmd
@@ -379,11 +372,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case stateCommissionWork:
-		if a.activeMode != nil {
-			newMode, modeCmd := a.activeMode.Update(msg)
-			a.activeMode = newMode
-			if modeCmd != nil {
-				cmds = append(cmds, modeCmd)
+		if a.workflowView != nil {
+			if cmd := a.workflowView.Update(msg); cmd != nil {
+				cmds = append(cmds, cmd)
 			}
 		}
 	}
@@ -401,14 +392,11 @@ func (a *App) handleMainMenuSelection() (tea.Model, tea.Cmd) {
 	switch {
 	case item.title == "Commission Work":
 		a.logInfo("Menu · Commission Work selected")
-		// Start new commission from planning phase
-		return a.startCommissionWork(workflow.PhasePlanning)
+		return a.startWorkflowRun(false)
 
 	case strings.HasPrefix(item.title, "Resume Work"):
 		a.logInfo("Menu · Resume Work selected (%s)", a.workflow.CurrentPhase().FriendlyName())
-		// Resume from detected phase
-		phase := a.workflow.CurrentPhase()
-		return a.startCommissionWork(phase)
+		return a.startWorkflowRun(true)
 
 	case item.title == "View Agents":
 		a.logInfo("Menu · View Agents selected")
@@ -428,79 +416,18 @@ func (a *App) handleMainMenuSelection() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// startCommissionWork begins or resumes the commission workflow
-func (a *App) startCommissionWork(fromPhase workflow.Phase) (tea.Model, tea.Cmd) {
+// startWorkflowRun bootstraps the workflow engine UI in either start or resume mode.
+func (a *App) startWorkflowRun(resume bool) (tea.Model, tea.Cmd) {
 	a.state = stateCommissionWork
-
-	// Create the mode for the given phase
-	mode := a.createModeForPhase(fromPhase)
-	if mode == nil {
-		a.statusMsg = fmt.Sprintf("Unknown phase: %s", fromPhase)
-		a.logWarn("Attempted to start unknown phase: %s", fromPhase)
-		return a.returnToMainMenu()
-	}
-
-	a.activeMode = mode
-	a.statusMsg = fmt.Sprintf("Starting %s...", mode.Name())
-	a.logInfo("Starting %s", mode.Name())
-
-	// Initialize the mode
-	cmd := mode.Init(a.modeCtx)
+	a.workflowView = newWorkflowView(a)
+	cmd := a.workflowView.Init(resume)
 	return a, cmd
-}
-
-// advanceToPhase moves to the next workflow phase
-func (a *App) advanceToPhase(phase workflow.Phase) (tea.Model, tea.Cmd) {
-	// Check if workflow is complete
-	if phase == workflow.PhaseComplete {
-		a.statusMsg = "Commission complete!"
-		return a.returnToMainMenu()
-	}
-
-	// Create and initialize the next mode
-	mode := a.createModeForPhase(phase)
-	if mode == nil {
-		a.statusMsg = fmt.Sprintf("Unknown phase: %s", phase)
-		a.logWarn("Cannot advance, unknown phase: %s", phase)
-		return a.returnToMainMenu()
-	}
-
-	a.activeMode = mode
-	a.statusMsg = fmt.Sprintf("Advancing to %s...", mode.Name())
-	a.logInfo("Advancing to %s", mode.Name())
-
-	cmd := mode.Init(a.modeCtx)
-	return a, cmd
-}
-
-// createModeForPhase creates the appropriate mode for a workflow phase
-func (a *App) createModeForPhase(phase workflow.Phase) modes.Mode {
-	switch phase {
-	case workflow.PhasePlanning:
-		return planning.New()
-	case workflow.PhaseOrchestratorSelection:
-		return orchestrator_selection.New()
-	case workflow.PhaseHiring:
-		return hiring.New()
-	case workflow.PhaseWorkProcess:
-		return work_process.New()
-	case workflow.PhaseRefinement:
-		return refinement.New()
-	case workflow.PhaseAgentRelease:
-		return agent_release.New()
-	case workflow.PhaseWorkCleanup:
-		return work_cleanup.New()
-	case workflow.PhaseOrchestratorRelease:
-		return orchestrator_release.New()
-	default:
-		return nil
-	}
 }
 
 // returnToMainMenu transitions back to the main menu
 func (a *App) returnToMainMenu() (tea.Model, tea.Cmd) {
 	a.state = stateMainMenu
-	a.activeMode = nil
+	a.workflowView = nil
 	a.logInfo("Returned to main menu (phase: %s)", a.workflow.CurrentPhase().FriendlyName())
 
 	// Refresh menu items (workflow state may have changed)
@@ -532,8 +459,8 @@ func (a *App) View() string {
 	case stateMainMenu:
 		content = a.mainMenu.View()
 	case stateCommissionWork:
-		if a.activeMode != nil {
-			content = a.activeMode.View()
+		if a.workflowView != nil {
+			content = a.workflowView.View()
 		} else {
 			content = "Loading sessions..."
 		}

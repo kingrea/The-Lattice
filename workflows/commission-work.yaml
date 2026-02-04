@@ -1,0 +1,56 @@
+id: commission-work
+name: Commission Work
+description:
+  Default workflow that drives planning artifacts through module engine
+
+modules:
+  - id: anchor-docs
+    module: anchor-docs
+    name: Create Anchor Documents
+    description:
+      Generates COMMISSION.md, ARCHITECTURE.md, and CONVENTIONS.md via the
+      planning skill.
+
+  - id: action-plan
+    module: action-plan
+    name: Create Action Plan
+    description: Produces MODULES.md and PLAN.md from the anchor documents.
+    depends_on: [anchor-docs]
+
+  - id: staff-review
+    module: staff-review
+    name: Staff Engineer Review
+    description:
+      Runs the staff engineer feedback cycle over MODULES.md and PLAN.md.
+    depends_on: [action-plan]
+
+  - id: staff-incorporate
+    module: staff-incorporate
+    name: Incorporate Staff Feedback
+    description:
+      Applies the Staff Engineer review to the plan and records the readiness
+      marker.
+    depends_on: [staff-review]
+
+  - id: parallel-reviews
+    module: parallel-reviews
+    name: Parallel Reviewer Personas
+    description:
+      Runs the four persona reviewers against the plan in parallel tmux
+      sessions.
+    depends_on: [staff-incorporate]
+
+  - id: consolidation
+    module: consolidation
+    name: Consolidate Reviews
+    description:
+      Synthesizes reviewer feedback into the plan and sets the reviews-applied
+      marker.
+    depends_on: [parallel-reviews]
+
+  - id: bead-creation
+    module: bead-creation
+    name: Create Beads
+    description: Converts the consolidated plan into beads for scheduling.
+    depends_on: [consolidation]
+    optional: true
