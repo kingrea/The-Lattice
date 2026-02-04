@@ -198,9 +198,19 @@ var (
 	ReviewAdvocateDoc   = register(newDocRef("review-advocate", "User Advocate Review", "Expert review focused on user value", func(wf *workflow.Workflow) string { return wf.ReviewAdvocatePath() }))
 	ReviewSkepticDoc    = register(newDocRef("review-skeptic", "Skeptic Review", "Expert review stress-testing risks", func(wf *workflow.Workflow) string { return wf.ReviewSkepticPath() }))
 
-	OrchestratorState = register(newJSONRef("orchestrator-state", "Orchestrator State", "orchestrator.json describing current orchestrator configuration", func(wf *workflow.Workflow) string { return wf.OrchestratorPath() }))
-	WorkersJSON       = register(newJSONRef("workers-json", "Workers Roster", "workers.json with currently hired agents", func(wf *workflow.Workflow) string { return wf.WorkersPath() }))
-	WorkLogDoc        = register(newDocRef("work-log", "Work Log", "work-log.md chronologically tracking progress", func(wf *workflow.Workflow) string { return wf.WorkLogPath() }))
+	OrchestratorState    = register(newJSONRef("orchestrator-state", "Orchestrator State", "orchestrator.json describing current orchestrator configuration", func(wf *workflow.Workflow) string { return wf.OrchestratorPath() }))
+	WorkersJSON          = register(newJSONRef("workers-json", "Workers Roster", "workers.json with currently hired agents", func(wf *workflow.Workflow) string { return wf.WorkersPath() }))
+	WorkLogDoc           = register(newDocRef("work-log", "Work Log", "work-log.md chronologically tracking progress", func(wf *workflow.Workflow) string { return wf.WorkLogPath() }))
+	WorkTasksDoc         = register(newDocRef("work-tasks", "Work Tasks", "TASKS.md enumerating prepared work sessions", func(wf *workflow.Workflow) string { return filepath.Join(wf.WorkDir(), "TASKS.md") }))
+	WorkInProgressMarker = register(newMarkerRef("work-in-progress", "Work In Progress Marker", "Marker created when a work cycle is actively staging or executing", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.WorkDir(), workflow.MarkerWorkInProgress)
+	}))
+	WorkCompleteMarker = register(newMarkerRef("work-complete", "Work Complete Marker", "Marker written after down-cycle cleanup finishes", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.WorkDir(), workflow.MarkerWorkComplete)
+	}))
+	RefinementNeededMarker = register(newMarkerRef("refinement-needed", "Refinement Needed Marker", "Marker emitted when no ready beads remain and refinement must run", func(wf *workflow.Workflow) string {
+		return filepath.Join(wf.WorkDir(), workflow.MarkerRefinementNeeded)
+	}))
 
 	ReviewsAppliedMarker = register(newMarkerRef("reviews-applied", "Reviews Applied Marker", "Marker file set when review feedback was incorporated", func(wf *workflow.Workflow) string { return wf.ReviewsAppliedPath() }))
 	StaffFeedbackApplied = register(newMarkerRef("staff-feedback-applied", "Staff Feedback Applied Marker", "Marker after staff feedback incorporation", func(wf *workflow.Workflow) string { return wf.StaffFeedbackAppliedPath() }))

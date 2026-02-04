@@ -11,6 +11,7 @@ import (
 	"github.com/yourusername/lattice/internal/modules/parallel_reviews"
 	"github.com/yourusername/lattice/internal/modules/staff_incorporate"
 	"github.com/yourusername/lattice/internal/modules/staff_review"
+	"github.com/yourusername/lattice/internal/modules/work_process"
 )
 
 // RegisterBuiltins installs all of the built-in module factories into the
@@ -28,4 +29,5 @@ func RegisterBuiltins(reg *module.Registry) {
 	hiring.Register(reg)
 	staff_incorporate.Register(reg)
 	staff_review.Register(reg)
+	work_process.Register(reg)
 }
