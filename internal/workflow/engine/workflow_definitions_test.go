@@ -40,6 +40,9 @@ func TestCommissionWorkflowIncludesDeliveryModules(t *testing.T) {
 	assertDependencies("work-process", []string{"hiring"})
 	assertDependencies("refinement", []string{"work-process"})
 	assertDependencies("release", []string{"refinement"})
+	if def.Runtime.MaxParallel != 3 {
+		t.Fatalf("commission-work max_parallel mismatch: want 3, got %d", def.Runtime.MaxParallel)
+	}
 }
 
 func TestCommissionWorkflowRunsToCompletionWithEngine(t *testing.T) {
@@ -77,6 +80,9 @@ func TestQuickStartWorkflowIncludesRapidModules(t *testing.T) {
 	if def.Runtime.MaxParallel != 2 {
 		t.Fatalf("quick-start max_parallel mismatch: want 2, got %d", def.Runtime.MaxParallel)
 	}
+	assertMetadataValue(t, def, "intent", "rapid-engagement")
+	assertMetadataValue(t, def, "recommended_use", "Short scoped work where teams need a staffed cycle quickly")
+	assertMetadataValue(t, def, "default_targets", "release")
 }
 
 func TestQuickStartWorkflowRunsToCompletionWithEngine(t *testing.T) {
@@ -106,6 +112,9 @@ func TestSoloWorkflowIncludesSingleOperatorModules(t *testing.T) {
 	if def.Runtime.MaxParallel != 1 {
 		t.Fatalf("solo max_parallel mismatch: want 1, got %d", def.Runtime.MaxParallel)
 	}
+	assertMetadataValue(t, def, "intent", "solo-delivery")
+	assertMetadataValue(t, def, "recommended_use", "Individuals running scoped delivery cycles without a crew")
+	assertMetadataValue(t, def, "default_targets", "release")
 }
 
 func TestSoloWorkflowRunsToCompletionWithEngine(t *testing.T) {
@@ -164,5 +173,16 @@ func runWorkflowToCompletion(t *testing.T, def workflow.WorkflowDefinition) {
 	}
 	if state.Status != EngineStatusComplete {
 		t.Fatalf("expected engine complete, got %s", state.Status)
+	}
+}
+
+func assertMetadataValue(t *testing.T, def workflow.WorkflowDefinition, key, want string) {
+	t.Helper()
+	got, ok := def.Metadata[key]
+	if !ok {
+		t.Fatalf("workflow %s metadata missing key %s", def.ID, key)
+	}
+	if got != want {
+		t.Fatalf("workflow %s metadata %s mismatch: want %q, got %q", def.ID, key, want, got)
 	}
 }
