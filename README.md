@@ -173,7 +173,53 @@ repository. Each definition lists the modules to run plus their dependencies.
 To customize the workflow, add additional YAML definitions under `workflows/`
 and point `.lattice/config.yaml` → `workflows.default` at the new ID.
 
+Every module entry in the YAML may include a `config` map. The keys/values are
+opaque to the runtime but they are passed straight into the module factory as a
+`module.Config`. Example:
+
+```yaml
+modules:
+  - id: parallel-reviews
+    module: parallel-reviews
+    depends_on: [staff-incorporate]
+    config:
+      reviewers:
+        - pragmatist
+        - advocate
+      openai_model: gpt-4.1
+```
+
+Those overrides live in the workflow definition so the TUI, resolver, and the
+headless CLI all see the same configuration.
+
 ## Customization
+
+### Module configuration overrides
+
+Operators can tune module behavior via three layers:
+
+1. **Environment** – set `LATTICE_ROOT` (required),
+   `LATTICE_PLUGIN_AUTO_INSTALL` (controls automatic OpenCode plugin installs),
+   or `LATTICE_ASSIGN_SPARK` (allow Spark agents during work-cycle planning).
+2. **Project + workflow files** – `.lattice/config.yaml` selects the default
+   workflow and community sources, while `workflows/<id>.yaml` supplies the
+   `modules[].config` map shown above.
+3. **CLI overrides** – the `module-runner` binary accepts `--config-file` (YAML
+   or JSON map) and repeatable `--set key=value` flags. The CLI builds the same
+   `module.Config` map the TUI would pass to `module.Registry.Resolve`, and
+   inline `--set` pairs win over the file when both are provided.
+
+Example headless run with overrides:
+
+```bash
+module-runner \
+  --project /path/to/project \
+  --module parallel-reviews \
+  --config-file overrides/reviewers.yaml \
+  --set reviewer_mode=fast-track
+```
+
+### Changing the OpenCode command
 
 ### Changing the OpenCode command
 

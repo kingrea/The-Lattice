@@ -47,6 +47,37 @@ focused on guiding the human through the phase.
 - Have no TUI concerns; they can execute inside tests or background workers.
 - Depend only on `ModuleContext`, `ArtifactStore`, and other modules' outputs.
 
+### Configuration overrides
+
+Workflow operators can tune module behavior without recompiling Go code. The
+runtime recognises three override channels, applied in the following order:
+
+1. **Environment variables** feed into `config.Config` and the orchestrator.
+   Core toggles include `LATTICE_ROOT` (required so modules can resolve skills
+   and defaults), `LATTICE_PLUGIN_AUTO_INSTALL` (controls automatic installation
+   of the `opencode-worktree` plugin), and `LATTICE_ASSIGN_SPARK` (opt-in spark
+   assignments when building work cycles). Modules can read these through
+   `ModuleContext.Config` or directly from the environment.
+2. **Config files** describe persistent workflow and module intent. Project
+   config (`.lattice/config.yaml`) sets the default workflow ID and community
+   sources, while workflow definitions (`workflows/<id>.yaml`) attach a `config`
+   map to each `ModuleRef`. During execution the engine stores that map on the
+   node, and both the TUI (`convertModuleConfig`) and resolver pass it to
+   `module.Registry.Resolve` as a `module.Config`.
+3. **CLI flags/runtime inputs** sit on top for ad-hoc changes. The TUI exposes
+   `engine.RuntimeOverrides` (targets, manual gates, max parallelism) and the
+   `module-runner` binary accepts `--config-file` (YAML/JSON map) plus repeated
+   `--set key=value` pairs. `module-runner` builds a `module.Config` from those
+   flags and hands it to the resolved module factory, so operators can toggle
+   reviewers, prompts, etc. without editing workflow YAML.
+
+Precedence flows upward: module defaults < workflow `ModuleRef.Config` <
+`module-runner` overrides (file first, then inline `--set`). Validation happens
+when the workflow definition is normalized and when the CLI parses override
+flags (bad files or malformed `key=value` pairs fail before modules run). Once a
+module is instantiated, the config map is immutable for the run and rides along
+with `engine.State` so retries and resumes see the same overrides.
+
 ### Collaboration flow
 
 1. Mode inspects workflow state (e.g., `MODULES.md` missing).
