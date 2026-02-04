@@ -201,8 +201,10 @@ from `<project>/workflows/` or from `${LATTICE_ROOT}/workflows/`. The default
 `commission-work` definition lives in `workflows/commission-work.yaml` in this
 repository. Each definition lists the modules to run plus their dependencies.
 
-- Selecting **Commission Work** starts a fresh engine run using the configured
-  workflow definition.
+- Selecting **Commission Work** opens the workflow picker so you can choose the
+  `commission-work`, `quick-start`, `solo`, or any custom workflow definition
+  before launching a new run. The picker keyboard shortcuts are the same as the
+  main menu (arrow keys + _enter_).
 - Selecting **Resume Work** calls the engine's resume path so it can refresh the
   dependency graph from disk.
 - The workflow pane shows ready modules, running modules, and manual gate
@@ -220,17 +222,24 @@ and point `.lattice/config.yaml` → `workflows.default` at the new ID.
 | `quick-start`     | Rapid engagements that still need staffing + release but skip extra reviews | anchor-docs → action-plan → staff-review → bead-creation → orchestrator-selection → hiring → work-process → release                                                                     |
 | `solo`            | Single operators who want anchor docs → execution without staffing overhead | anchor-docs → action-plan → solo-work → release                                                                                                                                         |
 
-Set `.lattice/config.yaml` → `workflows.default: quick-start` when you need to
-spin up a short scoped effort without running the persona reviews,
-consolidation, or refinement modules. The workflow engine still enforces
-dependencies, so downstream staffing modules only unblock once the quick path
-produces the required artifacts.
+Use the workflow picker in the TUI (highlight **Commission Work**, press
+_enter_, choose a workflow, then press _enter_ again) to switch to
+`quick-start`, `solo`, or any custom ID. The picker persists your choice to
+`.lattice/config.yaml` so future sessions launch the same workflow
+automatically. You can still edit `.lattice/config.yaml` manually if you prefer
+to set `workflows.default` yourself.
 
-For low-headcount work flip the same setting to `workflows.default: solo`. The
-solo path keeps the anchor docs + planning steps but swaps the staffing/work
-process block for the new `solo-work` module that seeds `workers.json` with a
-single operator, emits a work log template, and raises the markers required for
-release to run immediately after the plan is executed.
+The `quick-start` path spins up short scoped efforts without running the persona
+reviews, consolidation, or refinement modules. The workflow engine still
+enforces dependencies, so downstream staffing modules only unblock once the
+quick path produces the required artifacts.
+
+For low-headcount work choose `solo` from the picker (or set
+`workflows.default: solo`). The solo path keeps the anchor docs + planning steps
+but swaps the staffing/work process block for the new `solo-work` module that
+seeds `workers.json` with a single operator, emits a work log template, and
+raises the markers required for release to run immediately after the plan is
+executed.
 
 Every module entry in the YAML may include a `config` map. The keys/values are
 opaque to the runtime but they are passed straight into the module factory as a

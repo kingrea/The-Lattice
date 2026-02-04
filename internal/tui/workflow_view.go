@@ -62,8 +62,11 @@ type workClaimMsg struct {
 	err    error
 }
 
-func newWorkflowView(app *App) *workflowView {
-	id := strings.TrimSpace(app.config.DefaultWorkflow())
+func newWorkflowView(app *App, workflowID string) *workflowView {
+	id := strings.TrimSpace(workflowID)
+	if id == "" {
+		id = strings.TrimSpace(app.config.DefaultWorkflow())
+	}
 	if id == "" {
 		id = "commission-work"
 	}

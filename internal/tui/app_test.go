@@ -73,11 +73,73 @@ func TestHandleModuleRunMarksCompletion(t *testing.T) {
 	}
 }
 
-func newTestApp(t *testing.T, projectDir string) *App {
+func TestWorkflowSelectionPersistsAndLoadsDefinition(t *testing.T) {
+	projectDir := t.TempDir()
+	setTestLatticeRoot(t)
+	if err := config.InitLatticeDir(projectDir); err != nil {
+		t.Fatalf("init lattice dir: %v", err)
+	}
+	loaderCalls := map[string]int{}
+	loader := func(cfg *config.Config, workflowID string) (workflow.WorkflowDefinition, error) {
+		loaderCalls[workflowID]++
+		return workflow.WorkflowDefinition{
+			ID:   workflowID,
+			Name: strings.ToUpper(workflowID),
+			Modules: []workflow.ModuleRef{
+				{ID: "alpha", ModuleID: "stub-alpha", Name: "Alpha"},
+			},
+		}, nil
+	}
+	app := newTestApp(t, projectDir, WithWorkflowDefinitionLoader(loader))
+	if err := app.setWorkflowSelection("solo"); err != nil {
+		t.Fatalf("set workflow selection: %v", err)
+	}
+	if got := app.config.DefaultWorkflow(); got != "solo" {
+		t.Fatalf("expected config default to update, got %s", got)
+	}
+	model, cmd := app.startWorkflowRun(false)
+	app = runCommands(t, model, cmd)
+	if app.workflowView == nil {
+		t.Fatalf("workflow view missing after selection")
+	}
+	if got := app.workflowView.state.WorkflowID; got != "solo" {
+		t.Fatalf("workflow view launched %s, want solo", got)
+	}
+	if loaderCalls["solo"] == 0 {
+		t.Fatalf("expected workflow loader to be invoked for solo")
+	}
+}
+
+func TestWorkflowSelectorIncludesBundledWorkflows(t *testing.T) {
+	projectDir := t.TempDir()
+	setTestLatticeRoot(t)
+	if err := config.InitLatticeDir(projectDir); err != nil {
+		t.Fatalf("init lattice dir: %v", err)
+	}
+	app := newTestApp(t, projectDir)
+	app.config.Project.Workflows.Available = nil
+	app.selectedWorkflow = ""
+	app.refreshWorkflowMenu()
+	ids := map[string]struct{}{}
+	for _, option := range app.workflowChoices {
+		ids[option.ID()] = struct{}{}
+	}
+	for _, id := range []string{"commission-work", "quick-start", "solo"} {
+		if _, ok := ids[id]; !ok {
+			t.Fatalf("workflow menu missing %s", id)
+		}
+	}
+}
+
+func newTestApp(t *testing.T, projectDir string, opts ...AppOption) *App {
 	t.Helper()
 	loader := func(cfg *config.Config, workflowID string) (workflow.WorkflowDefinition, error) {
+		id := strings.TrimSpace(workflowID)
+		if id == "" {
+			id = "test-workflow"
+		}
 		return workflow.WorkflowDefinition{
-			ID:   "test-workflow",
+			ID:   id,
 			Name: "Test Workflow",
 			Modules: []workflow.ModuleRef{
 				{ID: "alpha", ModuleID: "stub-alpha", Name: "Alpha"},
@@ -91,7 +153,9 @@ func newTestApp(t *testing.T, projectDir string) *App {
 		})
 		return reg
 	}
-	app, err := NewApp(projectDir, WithWorkflowDefinitionLoader(loader), WithModuleRegistryFactory(factory))
+	baseOpts := []AppOption{WithWorkflowDefinitionLoader(loader), WithModuleRegistryFactory(factory)}
+	baseOpts = append(baseOpts, opts...)
+	app, err := NewApp(projectDir, baseOpts...)
 	if err != nil {
 		t.Fatalf("new app: %v", err)
 	}

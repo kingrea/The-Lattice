@@ -30,6 +30,12 @@ is registered through `internal/modules/modules.go`. Updating the workflow YAML
 is enough to change the pipeline order so the TUI, engine, and headless CLIs all
 see the same topology.
 
+Use the **Commission Work** workflow picker in the TUI to choose which
+definition to launch. Arrow keys move between `commission-work`, `quick-start`,
+`solo`, and any custom workflows discovered from `.lattice/config.yaml`. Press
+_enter_ to start the highlighted workflow; the picker records your selection
+back to the config file so later sessions start with the same default.
+
 For rapid engagements the repository also includes the `quick-start` workflow:
 
 | Order | Module ID                | Purpose                                                                |
@@ -43,9 +49,9 @@ For rapid engagements the repository also includes the `quick-start` workflow:
 | 7     | `work-process`           | Run the work cycle through the orchestrator and log outputs.           |
 | 8     | `release`                | Package the deliverables and reset runtime directories.                |
 
-Point `.lattice/config.yaml` to `workflows.default: quick-start` when you need
-this abbreviated path; both workflows share the same runtime + resolver
-semantics.
+Select `quick-start` in the workflow picker (or set `.lattice/config.yaml` →
+`workflows.default: quick-start`) when you need this abbreviated path; both
+workflows share the same runtime + resolver semantics.
 
 For solo operators there is a dedicated `solo` workflow:
 
@@ -56,9 +62,10 @@ For solo operators there is a dedicated `solo` workflow:
 | 3     | `solo-work`   | Create the solo execution log, synthesize the worker/orchestrator metadata, and mark work completion. |
 | 4     | `release`     | Package artifacts and close the workflow immediately after the solo log marks completion.             |
 
-Set `.lattice/config.yaml` to `workflows.default: solo` when one operator needs
-the anchor docs, plan, and release cadence without going through hiring or the
-work-process orchestrator loop.
+Choose `solo` in the workflow picker (or set `.lattice/config.yaml` →
+`workflows.default: solo`) when one operator needs the anchor docs, plan, and
+release cadence without going through hiring or the work-process orchestrator
+loop.
 
 ## Running Modules
 

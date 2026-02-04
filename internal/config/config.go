@@ -233,6 +233,21 @@ func (c *Config) DefaultWorkflow() string {
 	return c.Project.Workflows.Default
 }
 
+// SetDefaultWorkflow updates the default workflow identifier and persists the
+// value back to .lattice/config.yaml. The workflow ID is also appended to the
+// available list so the selector can display it on future launches.
+func (c *Config) SetDefaultWorkflow(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("config: workflow id is required")
+	}
+	c.Project.Workflows.Default = id
+	if !contains(c.Project.Workflows.Available, id) {
+		c.Project.Workflows.Available = append(c.Project.Workflows.Available, id)
+	}
+	return c.saveProjectConfig()
+}
+
 func (c *Config) loadProjectConfig() error {
 	path := c.ProjectConfigPath()
 	data, err := os.ReadFile(path)
@@ -390,4 +405,26 @@ func ensureProjectConfig(path string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(defaultProjectConfigYAML), 0644)
+}
+
+func (c *Config) saveProjectConfig() error {
+	if c == nil {
+		return fmt.Errorf("config: nil receiver")
+	}
+	c.Project.applyDefaults()
+	c.Project.normalize(c.ProjectDir)
+	if err := c.Project.validate(); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	if err := os.MkdirAll(c.LatticeProjectDir, 0o755); err != nil {
+		return fmt.Errorf("config: ensure lattice dir: %w", err)
+	}
+	data, err := yaml.Marshal(c.Project)
+	if err != nil {
+		return fmt.Errorf("config: encode config: %w", err)
+	}
+	if err := os.WriteFile(c.ProjectConfigPath(), data, 0644); err != nil {
+		return fmt.Errorf("config: write project config: %w", err)
+	}
+	return nil
 }

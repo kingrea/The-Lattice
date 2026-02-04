@@ -34,6 +34,7 @@ type appState int
 
 const (
 	stateMainMenu       appState = iota // Main menu with "Commission Work", etc.
+	stateWorkflowSelect                 // Workflow picker before launching the engine
 	stateCommissionWork                 // Running a commission workflow mode
 	stateViewAgents                     // Viewing available agents (legacy)
 )
@@ -123,9 +124,13 @@ type App struct {
 	workflow     *workflow.Workflow
 	logbook      *logbook.Logbook
 
-	workflowLoader  WorkflowDefinitionLoader
-	registryFactory func() *module.Registry
-	workflowView    *workflowView
+	workflowLoader        WorkflowDefinitionLoader
+	registryFactory       func() *module.Registry
+	workflowView          *workflowView
+	workflowMenu          list.Model
+	workflowChoices       []workflowOption
+	selectedWorkflow      string
+	pendingWorkflowResume bool
 
 	// UI components
 	mainMenu      list.Model // The main menu list
@@ -160,6 +165,18 @@ func (i menuItem) Title() string       { return i.title }
 func (i menuItem) Description() string { return i.desc }
 func (i menuItem) FilterValue() string { return i.title }
 
+type workflowOption struct {
+	id    string
+	title string
+	desc  string
+}
+
+func (o workflowOption) Title() string       { return o.title }
+func (o workflowOption) Description() string { return o.desc }
+func (o workflowOption) FilterValue() string { return o.id }
+
+func (o workflowOption) ID() string { return o.id }
+
 // NewApp creates a new App instance
 func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 	cfg, err := config.NewConfig(projectDir)
@@ -177,11 +194,15 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 	// Build menu items based on workflow state
 	menuItems := buildMainMenu(wf)
 
-	// Create the list component
+	// Create the list components
 	mainMenu := list.New(menuItems, list.NewDefaultDelegate(), 0, 0)
 	mainMenu.Title = "⬡ THE TERMINAL"
 	mainMenu.SetShowStatusBar(false)
 	mainMenu.SetFilteringEnabled(false)
+	workflowMenu := list.New(nil, list.NewDefaultDelegate(), 0, 0)
+	workflowMenu.Title = "Select Workflow"
+	workflowMenu.SetShowStatusBar(false)
+	workflowMenu.SetFilteringEnabled(false)
 
 	app := &App{
 		state:            stateMainMenu,
@@ -192,6 +213,8 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 		workflowLoader:   defaultWorkflowLoader,
 		registryFactory:  defaultModuleRegistryFactory,
 		mainMenu:         mainMenu,
+		workflowMenu:     workflowMenu,
+		selectedWorkflow: cfg.DefaultWorkflow(),
 		boardFocus:       focusMenu,
 		statusWindowName: statusWindowName,
 		statusReturnKey:  statusReturnHotkey,
@@ -201,6 +224,7 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 			opt(app)
 		}
 	}
+	app.refreshWorkflowMenu()
 	if session, windowIdx, err := detectTmuxContext(); err == nil {
 		app.tmuxSession = session
 		if err := ensureStatusWindow(session, windowIdx, statusWindowName); err == nil {
@@ -238,6 +262,112 @@ func buildMainMenu(wf *workflow.Workflow) []list.Item {
 	)
 
 	return items
+}
+
+func (a *App) refreshWorkflowMenu() {
+	options := a.buildWorkflowOptions()
+	items := make([]list.Item, len(options))
+	for i := range options {
+		items[i] = options[i]
+	}
+	a.workflowChoices = options
+	a.workflowMenu.SetItems(items)
+	if len(items) == 0 {
+		return
+	}
+	idx := a.workflowOptionIndex(a.activeWorkflowID())
+	if idx < 0 {
+		idx = 0
+	}
+	a.workflowMenu.Select(idx)
+}
+
+func (a *App) buildWorkflowOptions() []workflowOption {
+	ids := a.workflowIDs()
+	opts := make([]workflowOption, 0, len(ids))
+	loader := a.workflowLoader
+	for _, id := range ids {
+		option := workflowOption{
+			id:    id,
+			title: humanizeWorkflowID(id),
+			desc:  fmt.Sprintf("Workflow ID: %s", id),
+		}
+		if loader != nil && a.config != nil {
+			if def, err := loader(a.config, id); err == nil {
+				if name := strings.TrimSpace(def.Name); name != "" {
+					option.title = name
+				}
+				var parts []string
+				if desc := strings.TrimSpace(def.Description); desc != "" {
+					parts = append(parts, desc)
+				}
+				if def.Metadata != nil {
+					if use := strings.TrimSpace(def.Metadata["recommended_use"]); use != "" {
+						parts = append(parts, fmt.Sprintf("Use: %s", use))
+					}
+				}
+				parts = append(parts, fmt.Sprintf("ID: %s", id))
+				option.desc = strings.Join(parts, " · ")
+			} else if err != nil {
+				a.logWarn("Workflow %s metadata unavailable: %v", id, err)
+			}
+		}
+		opts = append(opts, option)
+	}
+	return opts
+}
+
+func (a *App) workflowIDs() []string {
+	if a.config == nil {
+		return []string{"commission-work", "quick-start", "solo"}
+	}
+	seen := map[string]struct{}{}
+	ordered := []string{}
+	appendID := func(values ...string) {
+		for _, value := range values {
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" {
+				continue
+			}
+			key := strings.ToLower(trimmed)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			ordered = append(ordered, trimmed)
+		}
+	}
+	appendID(a.config.Project.Workflows.Available...)
+	appendID(a.config.DefaultWorkflow())
+	appendID(a.selectedWorkflow)
+	appendID("commission-work", "quick-start", "solo")
+	return ordered
+}
+
+func (a *App) workflowOptionIndex(id string) int {
+	target := strings.ToLower(strings.TrimSpace(id))
+	if target == "" {
+		return -1
+	}
+	for idx, option := range a.workflowChoices {
+		candidate := strings.ToLower(strings.TrimSpace(option.ID()))
+		if candidate == target {
+			return idx
+		}
+	}
+	return -1
+}
+
+func (a *App) activeWorkflowID() string {
+	if id := strings.TrimSpace(a.selectedWorkflow); id != "" {
+		return id
+	}
+	if a.config != nil {
+		if id := strings.TrimSpace(a.config.DefaultWorkflow()); id != "" {
+			return id
+		}
+	}
+	return "commission-work"
 }
 
 func (a *App) logInfo(format string, args ...any) {
@@ -283,6 +413,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.mainMenu.SetSize(max(0, msg.Width-6), max(0, msg.Height-10))
+		a.workflowMenu.SetSize(max(0, msg.Width-6), max(0, msg.Height-10))
 		if a.state == stateCommissionWork && a.workflowView != nil {
 			return a, a.workflowView.Update(msg)
 		}
@@ -322,39 +453,46 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusMsg = "Refreshing status board..."
 			return a, a.fetchStatusSnapshot()
 		case "tab":
-			if a.boardFocus == focusMenu && len(a.sessionItems) > 0 {
-				a.boardFocus = focusSessions
-			} else {
-				a.boardFocus = focusMenu
+			if a.state == stateMainMenu {
+				if a.boardFocus == focusMenu && len(a.sessionItems) > 0 {
+					a.boardFocus = focusSessions
+				} else {
+					a.boardFocus = focusMenu
+				}
 			}
 		case "right", "l":
-			if len(a.sessionItems) > 0 {
+			if a.state == stateMainMenu && len(a.sessionItems) > 0 {
 				a.boardFocus = focusSessions
 			}
 		case "left", "h":
-			a.boardFocus = focusMenu
+			if a.state == stateMainMenu {
+				a.boardFocus = focusMenu
+			}
 		case "up", "k":
-			if a.boardFocus == focusSessions && len(a.sessionItems) > 0 {
+			if a.state == stateMainMenu && a.boardFocus == focusSessions && len(a.sessionItems) > 0 {
 				if a.sessionSelection > 0 {
 					a.sessionSelection--
 				}
 				return a, nil
 			}
 		case "down", "j":
-			if a.boardFocus == focusSessions && len(a.sessionItems) > 0 {
+			if a.state == stateMainMenu && a.boardFocus == focusSessions && len(a.sessionItems) > 0 {
 				if a.sessionSelection < len(a.sessionItems)-1 {
 					a.sessionSelection++
 				}
 				return a, nil
 			}
 		case "enter":
-			if a.boardFocus == focusSessions {
-				if cmd := a.openSelectedSessionWindow(); cmd != nil {
-					return a, cmd
+			switch a.state {
+			case stateWorkflowSelect:
+				return a.confirmWorkflowSelection()
+			case stateMainMenu:
+				if a.boardFocus == focusSessions {
+					if cmd := a.openSelectedSessionWindow(); cmd != nil {
+						return a, cmd
+					}
+					return a, nil
 				}
-				return a, nil
-			}
-			if a.state == stateMainMenu {
 				return a.handleMainMenuSelection()
 			}
 		}
@@ -370,6 +508,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if menuCmd != nil {
 				cmds = append(cmds, menuCmd)
 			}
+		}
+	case stateWorkflowSelect:
+		var menuCmd tea.Cmd
+		a.workflowMenu, menuCmd = a.workflowMenu.Update(msg)
+		if menuCmd != nil {
+			cmds = append(cmds, menuCmd)
 		}
 	case stateCommissionWork:
 		if a.workflowView != nil {
@@ -392,7 +536,7 @@ func (a *App) handleMainMenuSelection() (tea.Model, tea.Cmd) {
 	switch {
 	case item.title == "Commission Work":
 		a.logInfo("Menu · Commission Work selected")
-		return a.startWorkflowRun(false)
+		return a.beginWorkflowSelection(false)
 
 	case strings.HasPrefix(item.title, "Resume Work"):
 		a.logInfo("Menu · Resume Work selected (%s)", a.workflow.CurrentPhase().FriendlyName())
@@ -416,10 +560,54 @@ func (a *App) handleMainMenuSelection() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+func (a *App) beginWorkflowSelection(resume bool) (tea.Model, tea.Cmd) {
+	if len(a.workflowChoices) == 0 {
+		a.refreshWorkflowMenu()
+	}
+	a.state = stateWorkflowSelect
+	a.pendingWorkflowResume = resume
+	a.boardFocus = focusMenu
+	if a.width > 0 && a.height > 0 {
+		a.workflowMenu.SetSize(max(0, a.width-6), max(0, a.height-10))
+	}
+	a.statusMsg = "Select a workflow to launch"
+	return a, nil
+}
+
+func (a *App) confirmWorkflowSelection() (tea.Model, tea.Cmd) {
+	item, ok := a.workflowMenu.SelectedItem().(workflowOption)
+	if !ok {
+		a.statusMsg = "Workflow selection unavailable"
+		return a, nil
+	}
+	id := item.ID()
+	if err := a.setWorkflowSelection(id); err != nil {
+		a.statusMsg = fmt.Sprintf("Workflow selection failed: %v", err)
+		a.logError("Workflow selection failed: %v", err)
+		return a, nil
+	}
+	a.logInfo("Workflow · %s selected", id)
+	return a.startWorkflowRun(a.pendingWorkflowResume)
+}
+
+func (a *App) setWorkflowSelection(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("workflow id is required")
+	}
+	if err := a.config.SetDefaultWorkflow(id); err != nil {
+		return err
+	}
+	a.selectedWorkflow = a.config.DefaultWorkflow()
+	a.refreshWorkflowMenu()
+	return nil
+}
+
 // startWorkflowRun bootstraps the workflow engine UI in either start or resume mode.
 func (a *App) startWorkflowRun(resume bool) (tea.Model, tea.Cmd) {
 	a.state = stateCommissionWork
-	a.workflowView = newWorkflowView(a)
+	a.pendingWorkflowResume = false
+	a.workflowView = newWorkflowView(a, a.activeWorkflowID())
 	cmd := a.workflowView.Init(resume)
 	return a, cmd
 }
@@ -428,10 +616,12 @@ func (a *App) startWorkflowRun(resume bool) (tea.Model, tea.Cmd) {
 func (a *App) returnToMainMenu() (tea.Model, tea.Cmd) {
 	a.state = stateMainMenu
 	a.workflowView = nil
+	a.pendingWorkflowResume = false
 	a.logInfo("Returned to main menu (phase: %s)", a.workflow.CurrentPhase().FriendlyName())
 
 	// Refresh menu items (workflow state may have changed)
 	a.mainMenu.SetItems(buildMainMenu(a.workflow))
+	a.refreshWorkflowMenu()
 
 	return a, nil
 }
@@ -458,6 +648,8 @@ func (a *App) View() string {
 	switch a.state {
 	case stateMainMenu:
 		content = a.mainMenu.View()
+	case stateWorkflowSelect:
+		content = a.renderWorkflowSelection()
 	case stateCommissionWork:
 		if a.workflowView != nil {
 			content = a.workflowView.View()
@@ -582,6 +774,18 @@ func (a *App) renderMainArea(content string, width int) string {
 		content = "Ready to commission work."
 	}
 	return lipgloss.NewStyle().Width(max(20, width)).Render(content)
+}
+
+func (a *App) renderWorkflowSelection() string {
+	view := a.workflowMenu.View()
+	if strings.TrimSpace(view) == "" {
+		view = "No workflows available"
+	}
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#AAAAAA")).
+		MarginTop(1).
+		Render("Enter → launch workflow    Esc → cancel")
+	return lipgloss.JoinVertical(lipgloss.Left, view, hint)
 }
 
 func (a *App) renderSessionsPanel(width int) string {
@@ -806,6 +1010,24 @@ func hotkeyLabel(key string) string {
 		return fmt.Sprintf("Alt+%s", strings.ToUpper(strings.TrimPrefix(key, "M-")))
 	}
 	return strings.ToUpper(key)
+}
+
+func humanizeWorkflowID(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "Workflow"
+	}
+	replacer := strings.NewReplacer("-", " ", "_", " ")
+	sanitized := replacer.Replace(trimmed)
+	parts := strings.Fields(sanitized)
+	if len(parts) == 0 {
+		return "Workflow"
+	}
+	for i, part := range parts {
+		lower := strings.ToLower(part)
+		parts[i] = strings.ToUpper(lower[:1]) + lower[1:]
+	}
+	return strings.Join(parts, " ")
 }
 
 func phasePosition(p workflow.Phase) (int, int) {

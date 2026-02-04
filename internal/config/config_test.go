@@ -112,3 +112,41 @@ func TestInitLatticeDirCreatesProjectConfigTemplate(t *testing.T) {
 		t.Fatalf("expected default config template, got %s", contents)
 	}
 }
+
+func TestSetDefaultWorkflowPersistsSelection(t *testing.T) {
+	projectDir := t.TempDir()
+	latticeDir := filepath.Join(projectDir, ".lattice")
+	if err := os.MkdirAll(latticeDir, 0o755); err != nil {
+		t.Fatalf("mkdir lattice dir: %v", err)
+	}
+	c := &Config{ProjectDir: projectDir, LatticeProjectDir: latticeDir, Project: defaultProjectConfig()}
+	if err := c.SetDefaultWorkflow("quick-start"); err != nil {
+		t.Fatalf("SetDefaultWorkflow: %v", err)
+	}
+	if got := c.DefaultWorkflow(); got != "quick-start" {
+		t.Fatalf("expected default workflow to persist, got %s", got)
+	}
+	if !contains(c.Project.Workflows.Available, "quick-start") {
+		t.Fatalf("expected available workflows to include quick-start")
+	}
+	configPath := filepath.Join(latticeDir, "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading persisted config: %v", err)
+	}
+	if !strings.Contains(string(data), "quick-start") {
+		t.Fatalf("expected persisted config to mention quick-start, got %s", data)
+	}
+}
+
+func TestSetDefaultWorkflowRequiresID(t *testing.T) {
+	projectDir := t.TempDir()
+	latticeDir := filepath.Join(projectDir, ".lattice")
+	if err := os.MkdirAll(latticeDir, 0o755); err != nil {
+		t.Fatalf("mkdir lattice dir: %v", err)
+	}
+	c := &Config{ProjectDir: projectDir, LatticeProjectDir: latticeDir, Project: defaultProjectConfig()}
+	if err := c.SetDefaultWorkflow(" "); err == nil {
+		t.Fatalf("expected error when workflow id is blank")
+	}
+}
