@@ -75,6 +75,28 @@ Modes and the future workflow engine should call `Resolver.Refresh` to capture a
 fresh snapshot, then read `Resolver.Ready()` or `Resolver.Queue()` when deciding
 what to run next.
 
+### Runnable selection + scheduling
+
+`internal/workflow/scheduler` layers on top of the resolver to produce runnable
+module batches for the engine. It evaluates the resolver queue, filters out
+nodes that are still pending (missing artifacts, invalid fingerprints, or
+blocked dependencies), and applies runtime constraints such as:
+
+- Concurrency limits (`MaxParallel`) so we never launch more modules than the
+  workflow can safely run in parallel (useful when tmux/OpenCode slots are
+  limited).
+- Manual gates that require operator approval before continuing. The scheduler
+  records skip reasons so modes can surface "awaiting approval" states.
+- Active run tracking so the same module isn't dispatched twice while it is
+  still working.
+
+Callers pass a `RunnableRequest` (targets, currently running IDs, manual gate
+status, optional batch size) and receive a `RunnableBatch`. The batch includes
+both runnable nodes and an explicit `Skipped` map explaining why otherwise-ready
+nodes were withheld (manual gate, concurrency cap, not-ready state). This lets
+Bubble Tea modes and the upcoming engine request work in a loop without knowing
+about artifact invalidation details.
+
 This explicit split lets us evolve the runtime incrementally: we can convert one
 mode at a time to modules without blocking the rest of the CLI.
 
