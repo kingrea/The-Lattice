@@ -132,6 +132,7 @@ type App struct {
 	workflowChoices       []workflowOption
 	selectedWorkflow      string
 	pendingWorkflowResume bool
+	workflowReturnState   appState
 
 	// UI components
 	mainMenu      list.Model // The main menu list
@@ -210,19 +211,20 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 	workflowMenu.SetFilteringEnabled(false)
 
 	app := &App{
-		state:            stateMainMenu,
-		config:           cfg,
-		orchestrator:     orch,
-		workflow:         wf,
-		logbook:          lb,
-		workflowLoader:   defaultWorkflowLoader,
-		registryFactory:  defaultModuleRegistryFactory,
-		mainMenu:         mainMenu,
-		workflowMenu:     workflowMenu,
-		selectedWorkflow: cfg.DefaultWorkflow(),
-		boardFocus:       focusMenu,
-		statusWindowName: statusWindowName,
-		statusReturnKey:  statusReturnHotkey,
+		state:               stateMainMenu,
+		config:              cfg,
+		orchestrator:        orch,
+		workflow:            wf,
+		logbook:             lb,
+		workflowLoader:      defaultWorkflowLoader,
+		registryFactory:     defaultModuleRegistryFactory,
+		mainMenu:            mainMenu,
+		workflowMenu:        workflowMenu,
+		selectedWorkflow:    cfg.DefaultWorkflow(),
+		boardFocus:          focusMenu,
+		statusWindowName:    statusWindowName,
+		statusReturnKey:     statusReturnHotkey,
+		workflowReturnState: stateMainMenu,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -458,6 +460,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.scheduleStatusRefresh()
 
+	case workflowFinishedMsg:
+		return a.handleWorkflowFinished(msg)
+
 	case tea.KeyMsg:
 		key := msg.String()
 		switch key {
@@ -627,6 +632,7 @@ func (a *App) setWorkflowSelection(id string) error {
 
 // startWorkflowRun bootstraps the workflow engine UI in either start or resume mode.
 func (a *App) startWorkflowRun(resume bool) (tea.Model, tea.Cmd) {
+	a.workflowReturnState = a.state
 	a.state = stateCommissionWork
 	a.pendingWorkflowResume = false
 	a.workflowView = newWorkflowView(a, a.activeWorkflowID())
@@ -639,6 +645,7 @@ func (a *App) returnToMainMenu() (tea.Model, tea.Cmd) {
 	a.state = stateMainMenu
 	a.workflowView = nil
 	a.pendingWorkflowResume = false
+	a.workflowReturnState = stateMainMenu
 	a.logInfo("Returned to main menu (phase: %s)", a.workflow.CurrentPhase().FriendlyName())
 
 	// Refresh menu items (workflow state may have changed)
@@ -646,6 +653,30 @@ func (a *App) returnToMainMenu() (tea.Model, tea.Cmd) {
 	a.refreshWorkflowMenu()
 
 	return a, nil
+}
+
+func (a *App) handleWorkflowFinished(msg workflowFinishedMsg) (tea.Model, tea.Cmd) {
+	workflowName := humanizeWorkflowID(msg.WorkflowID)
+	if strings.TrimSpace(workflowName) == "" {
+		workflowName = "Workflow"
+	}
+	statusLabel := strings.TrimSpace(string(msg.Status))
+	if statusLabel == "" {
+		statusLabel = "complete"
+	}
+	summary := fmt.Sprintf("%s finished · %s", workflowName, titleCase(statusLabel))
+	a.statusMsg = summary
+	a.logInfo("Workflow %s finished (status: %s)", msg.WorkflowID, statusLabel)
+	switch a.workflowReturnState {
+	case stateMainMenu, stateWorkflowSelect:
+		return a.returnToMainMenu()
+	default:
+		// No parent view to return to, so exit the TUI gracefully.
+		a.workflowView = nil
+		a.pendingWorkflowResume = false
+		a.workflowReturnState = stateMainMenu
+		return a, tea.Quit
+	}
 }
 
 // View renders the current state to a string.

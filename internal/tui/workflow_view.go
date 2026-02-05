@@ -49,6 +49,7 @@ type workflowView struct {
 	targets         []string
 	loader          WorkflowDefinitionLoader
 	registryFactory func(*config.Config) (*module.Registry, error)
+	finished        bool
 }
 
 type moduleLabel struct {
@@ -77,6 +78,13 @@ type moduleRunFinishedMsg struct {
 type workClaimMsg struct {
 	result engine.ClaimResult
 	err    error
+}
+
+type workflowFinishedMsg struct {
+	WorkflowID string
+	RunID      string
+	Status     engine.EngineStatus
+	Reason     string
 }
 
 func newWorkflowView(app *App, workflowID string) *workflowView {
@@ -115,11 +123,19 @@ func (v *workflowView) Update(msg tea.Msg) tea.Cmd {
 		}
 		v.err = nil
 		v.stateLoaded = true
-		v.state = m.state
-		v.installDefinition(m.state.Definition)
-		v.installRuntimeState(m.state)
+		cmd := v.applyState(m.state)
 		v.setStatus("Workflow engine ready")
-		return v.scheduleRefresh()
+		if v.finished {
+			return cmd
+		}
+		refresh := v.scheduleRefresh()
+		if cmd != nil && refresh != nil {
+			return tea.Batch(cmd, refresh)
+		}
+		if cmd != nil {
+			return cmd
+		}
+		return refresh
 	case workflowStateMsg:
 		if m.err != nil {
 			v.err = m.err
@@ -127,15 +143,20 @@ func (v *workflowView) Update(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		v.err = nil
-		v.state = m.state
-		v.installDefinition(m.state.Definition)
-		v.installRuntimeState(m.state)
-		return nil
+		return v.applyState(m.state)
 	case engineRefreshRequest:
-		if !v.stateLoaded {
+		if !v.stateLoaded || v.finished {
 			return nil
 		}
-		return tea.Batch(v.refreshEngineState(), v.scheduleRefresh())
+		refresh := v.refreshEngineState()
+		schedule := v.scheduleRefresh()
+		if refresh != nil && schedule != nil {
+			return tea.Batch(refresh, schedule)
+		}
+		if refresh != nil {
+			return refresh
+		}
+		return schedule
 	case moduleRunFinishedMsg:
 		return v.handleModuleRunFinished(m)
 	case workClaimMsg:
@@ -145,14 +166,19 @@ func (v *workflowView) Update(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		v.err = nil
-		v.state = m.result.State
-		v.installDefinition(m.result.State.Definition)
-		v.installRuntimeState(m.result.State)
+		cmd := v.applyState(m.result.State)
 		if len(m.result.Claims) == 0 {
 			v.setStatus("No runnable modules satisfied the request")
-			return nil
+			return cmd
 		}
-		return v.launchClaims(m.result.Claims)
+		launch := v.launchClaims(m.result.Claims)
+		if cmd != nil && launch != nil {
+			return tea.Batch(cmd, launch)
+		}
+		if cmd != nil {
+			return cmd
+		}
+		return launch
 	case tea.KeyMsg:
 		return v.handleKeyMsg(m)
 	default:
@@ -489,14 +515,11 @@ func (v *workflowView) handleModuleRunFinished(msg moduleRunFinishedMsg) tea.Cmd
 		v.setStatus(fmt.Sprintf("Engine update failed: %v", err))
 		return nil
 	}
-	v.state = state
-	v.installDefinition(state.Definition)
-	v.installRuntimeState(state)
-	return nil
+	return v.applyState(state)
 }
 
 func (v *workflowView) refreshEngineState() tea.Cmd {
-	if v.engine == nil {
+	if v.engine == nil || v.finished {
 		return nil
 	}
 	return func() tea.Msg {
@@ -506,7 +529,7 @@ func (v *workflowView) refreshEngineState() tea.Cmd {
 }
 
 func (v *workflowView) scheduleRefresh() tea.Cmd {
-	if v.engine == nil {
+	if v.engine == nil || v.finished {
 		return nil
 	}
 	return tea.Tick(engineRefreshInterval, func(time.Time) tea.Msg {
@@ -635,6 +658,45 @@ func (v *workflowView) installRuntimeState(state engine.State) {
 	if v.selection >= len(state.Nodes) {
 		v.selection = max(0, len(state.Nodes)-1)
 	}
+}
+
+func (v *workflowView) applyState(state engine.State) tea.Cmd {
+	v.state = state
+	v.installDefinition(state.Definition)
+	v.installRuntimeState(state)
+	return v.checkForCompletion()
+}
+
+func (v *workflowView) checkForCompletion() tea.Cmd {
+	if v.finished {
+		return nil
+	}
+	if v.state.Status == engine.EngineStatusComplete {
+		return v.workflowFinished("engine-complete")
+	}
+	if len(v.state.Nodes) == 0 {
+		return v.workflowFinished("no-modules")
+	}
+	return nil
+}
+
+func (v *workflowView) workflowFinished(reason string) tea.Cmd {
+	if v.finished {
+		return nil
+	}
+	v.finished = true
+	status := strings.TrimSpace(string(v.state.Status))
+	if status == "" {
+		status = "complete"
+	}
+	v.setStatus(fmt.Sprintf("Workflow finished (%s) · returning to menu", friendlyLabel(status)))
+	msg := workflowFinishedMsg{
+		WorkflowID: v.state.WorkflowID,
+		RunID:      v.state.RunID,
+		Status:     v.state.Status,
+		Reason:     reason,
+	}
+	return func() tea.Msg { return msg }
 }
 
 func (v *workflowView) runtimeOverrides() *engine.RuntimeOverrides {

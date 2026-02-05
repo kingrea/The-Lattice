@@ -73,6 +73,67 @@ func TestHandleModuleRunMarksCompletion(t *testing.T) {
 	}
 }
 
+func TestWorkflowCompletionReturnsToMainMenu(t *testing.T) {
+	projectDir := t.TempDir()
+	setTestLatticeRoot(t)
+	if err := config.InitLatticeDir(projectDir); err != nil {
+		t.Fatalf("init lattice dir: %v", err)
+	}
+	app := newTestApp(t, projectDir)
+	model, cmd := app.startWorkflowRun(false)
+	app = runCommands(t, model, cmd)
+	view := app.workflowView
+	if view == nil {
+		t.Fatalf("workflow view missing")
+	}
+	mod, err := view.registry.Resolve("stub-alpha", nil)
+	if err != nil {
+		t.Fatalf("resolve module: %v", err)
+	}
+	if _, err := mod.Run(view.moduleCtx); err != nil {
+		t.Fatalf("run module: %v", err)
+	}
+	finishCmd := view.handleModuleRunFinished(moduleRunFinishedMsg{id: "alpha", result: module.Result{Status: module.StatusCompleted}})
+	if finishCmd == nil {
+		t.Fatalf("expected workflow completion command")
+	}
+	msg := finishCmd()
+	if msg == nil {
+		t.Fatalf("expected workflow completion message")
+	}
+	nextModel, nextCmd := app.Update(msg)
+	app = runCommands(t, nextModel, nextCmd)
+	if app.state != stateMainMenu {
+		t.Fatalf("expected return to main menu after completion, got state %d", app.state)
+	}
+}
+
+func TestWorkflowCompletionQuitsWithoutParent(t *testing.T) {
+	projectDir := t.TempDir()
+	setTestLatticeRoot(t)
+	if err := config.InitLatticeDir(projectDir); err != nil {
+		t.Fatalf("init lattice dir: %v", err)
+	}
+	app := newTestApp(t, projectDir)
+	app.workflowReturnState = stateCommissionWork
+	model, cmd := app.handleWorkflowFinished(workflowFinishedMsg{WorkflowID: "solo", Status: engine.EngineStatusComplete})
+	var ok bool
+	app, ok = model.(*App)
+	if !ok {
+		t.Fatalf("expected app model, got %T", model)
+	}
+	if cmd == nil {
+		t.Fatalf("expected quit command")
+	}
+	if msg := cmd(); msg == nil {
+		t.Fatalf("expected quit message")
+	} else {
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Fatalf("expected tea.QuitMsg, got %T", msg)
+		}
+	}
+}
+
 func TestWorkflowSelectionPersistsAndLoadsDefinition(t *testing.T) {
 	projectDir := t.TempDir()
 	setTestLatticeRoot(t)
