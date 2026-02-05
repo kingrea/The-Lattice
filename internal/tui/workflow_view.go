@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/kingrea/The-Lattice/internal/config"
 	"github.com/kingrea/The-Lattice/internal/module"
@@ -20,6 +21,16 @@ import (
 )
 
 const engineRefreshInterval = 5 * time.Second
+
+var (
+	labelStyleReady   = lipgloss.NewStyle().Foreground(lipgloss.Color("#4CAF50")).Bold(true)
+	labelStyleBlocked = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B")).Bold(true)
+	labelStyleRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("#5B8DEF")).Bold(true)
+	labelStyleGate    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7B801")).Bold(true)
+	labelStyleSkipped = lipgloss.NewStyle().Foreground(lipgloss.Color("#999999"))
+	labelStyleDefault = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+	detailTextStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0AEC0"))
+)
 
 type workflowView struct {
 	app             *App
@@ -38,6 +49,11 @@ type workflowView struct {
 	targets         []string
 	loader          WorkflowDefinitionLoader
 	registryFactory func(*config.Config) (*module.Registry, error)
+}
+
+type moduleLabel struct {
+	text  string
+	style lipgloss.Style
 }
 
 type workflowInitMsg struct {
@@ -175,28 +191,19 @@ func (v *workflowView) renderModuleLine(idx int, node engine.ModuleStatus) strin
 	if idx == v.selection {
 		indicator = ">"
 	}
-	labels := []string{string(node.State)}
-	if v.isRunnable(node.ID) {
-		labels = append(labels, "ready")
-	}
-	if _, ok := v.running[node.ID]; ok {
-		labels = append(labels, "running")
-	}
-	if gate, ok := v.manualGates[node.ID]; ok && gate.Required {
-		status := "pending"
-		if gate.Approved {
-			status = "approved"
-		}
-		labels = append(labels, fmt.Sprintf("gate:%s", status))
-	}
-	if skip, ok := v.state.Skipped[node.ID]; ok {
-		labels = append(labels, fmt.Sprintf("skipped:%s", skip.Detail))
-	}
 	name := node.Name
 	if strings.TrimSpace(name) == "" {
 		name = node.ID
 	}
-	return fmt.Sprintf("%s %s · [%s]", indicator, name, strings.Join(labels, ", "))
+	labelSpecs := v.moduleLabelSpecs(node)
+	if len(labelSpecs) == 0 {
+		labelSpecs = []moduleLabel{{text: "Unknown", style: labelStyleDefault}}
+	}
+	rendered := make([]string, 0, len(labelSpecs))
+	for _, spec := range labelSpecs {
+		rendered = append(rendered, spec.style.Render(spec.text))
+	}
+	return fmt.Sprintf("%s %s · [%s]", indicator, name, strings.Join(rendered, ", "))
 }
 
 func (v *workflowView) renderModuleDetails(node engine.ModuleStatus) string {
@@ -218,9 +225,83 @@ func (v *workflowView) renderModuleDetails(node engine.ModuleStatus) string {
 		details = append(details, runLine)
 	}
 	if len(details) == 0 {
-		return "  no additional details"
+		return detailTextStyle.Render("  no additional details")
 	}
-	return "  " + strings.Join(details, "\n  ")
+	body := "  " + strings.Join(details, "\n  ")
+	return detailTextStyle.Render(body)
+}
+
+func (v *workflowView) moduleLabelSpecs(node engine.ModuleStatus) []moduleLabel {
+	var specs []moduleLabel
+	add := func(text string, style lipgloss.Style) {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return
+		}
+		for _, existing := range specs {
+			if existing.text == text {
+				return
+			}
+		}
+		specs = append(specs, moduleLabel{text: text, style: style})
+	}
+	stateText := friendlyLabel(string(node.State))
+	add(stateText, labelStyleForState(string(node.State)))
+	if v.isRunnable(node.ID) {
+		add("Ready", labelStyleReady)
+	}
+	if _, ok := v.running[node.ID]; ok {
+		add("Running", labelStyleRunning)
+	}
+	if gate, ok := v.manualGates[node.ID]; ok && gate.Required {
+		label := "Gate Pending"
+		style := labelStyleGate
+		if gate.Approved {
+			label = "Gate Approved"
+			style = labelStyleReady
+		}
+		add(label, style)
+	}
+	if skip, ok := v.state.Skipped[node.ID]; ok {
+		detail := strings.TrimSpace(skip.Detail)
+		label := "Skipped"
+		if detail != "" {
+			label = fmt.Sprintf("Skipped (%s)", friendlyLabel(detail))
+		}
+		add(label, labelStyleSkipped)
+	}
+	return specs
+}
+
+func labelStyleForState(state string) lipgloss.Style {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "ready":
+		return labelStyleReady
+	case "blocked":
+		return labelStyleBlocked
+	case "running":
+		return labelStyleRunning
+	case "skipped":
+		return labelStyleSkipped
+	default:
+		return labelStyleDefault
+	}
+}
+
+func friendlyLabel(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer("_", " ", "-", " ")
+	words := strings.Fields(replacer.Replace(strings.ToLower(value)))
+	if len(words) == 0 {
+		return ""
+	}
+	for i, word := range words {
+		words[i] = strings.ToUpper(word[:1]) + word[1:]
+	}
+	return strings.Join(words, " ")
 }
 
 func (v *workflowView) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
