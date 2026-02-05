@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadProjectConfigDefaultsWhenMissing(t *testing.T) {
@@ -49,6 +50,10 @@ workflows:
   available:
     - commission-work
     - audit-practice
+session:
+  idle_watchdog:
+    enabled: false
+    timeout: 10m
 `)
 	if err := os.WriteFile(filepath.Join(latticeDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -73,6 +78,13 @@ workflows:
 	}
 	if c.DefaultWorkflow() != "commission-work" {
 		t.Fatalf("wrong default workflow: %s", c.DefaultWorkflow())
+	}
+	settings := c.IdleWatchdogSettings()
+	if settings.Enabled {
+		t.Fatalf("expected idle watchdog to be disabled")
+	}
+	if settings.Timeout != 10*time.Minute {
+		t.Fatalf("expected idle timeout 10m, got %s", settings.Timeout)
 	}
 }
 
@@ -148,5 +160,41 @@ func TestSetDefaultWorkflowRequiresID(t *testing.T) {
 	c := &Config{ProjectDir: projectDir, LatticeProjectDir: latticeDir, Project: defaultProjectConfig()}
 	if err := c.SetDefaultWorkflow(" "); err == nil {
 		t.Fatalf("expected error when workflow id is blank")
+	}
+}
+
+func TestIdleWatchdogSettingsDefaults(t *testing.T) {
+	c := &Config{}
+	settings := c.IdleWatchdogSettings()
+	if !settings.Enabled {
+		t.Fatalf("expected idle watchdog default enabled")
+	}
+	if settings.Timeout != 5*time.Minute {
+		t.Fatalf("expected default timeout 5m, got %s", settings.Timeout)
+	}
+}
+
+func TestNewConfigUsesEmbeddedDefaultRoot(t *testing.T) {
+	projectDir := t.TempDir()
+	prevEnv := os.Getenv("LATTICE_ROOT")
+	prevDefault := defaultLatticeRoot
+	t.Cleanup(func() {
+		defaultLatticeRoot = prevDefault
+		if prevEnv == "" {
+			_ = os.Unsetenv("LATTICE_ROOT")
+			return
+		}
+		if err := os.Setenv("LATTICE_ROOT", prevEnv); err != nil {
+			t.Fatalf("restore env: %v", err)
+		}
+	})
+	_ = os.Unsetenv("LATTICE_ROOT")
+	defaultLatticeRoot = filepath.Join(t.TempDir(), "lattice-root")
+	cfg, err := NewConfig(projectDir)
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	if cfg.LatticeRoot != defaultLatticeRoot {
+		t.Fatalf("expected lattice root %s, got %s", defaultLatticeRoot, cfg.LatticeRoot)
 	}
 }

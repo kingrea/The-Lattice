@@ -12,9 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+var defaultLatticeRoot string
 
 const (
 	// LatticeDir is the name of the directory we create in each project
@@ -48,6 +51,10 @@ core_agents:
 
 workflows:
   default: commission-work
+# Idle watchdog closes idle OpenCode sessions automatically.
+session:
+  idle_watchdog:
+    timeout: 5m
 `
 
 // CommunityRef declares one community source entry inside .lattice/config.yaml.
@@ -76,6 +83,18 @@ type ProjectConfig struct {
 	Communities []CommunityRef               `yaml:"communities"`
 	CoreAgents  map[string]CoreAgentOverride `yaml:"core_agents"`
 	Workflows   WorkflowConfig               `yaml:"workflows"`
+	Session     SessionConfig                `yaml:"session"`
+}
+
+// SessionConfig governs interactive shell behavior.
+type SessionConfig struct {
+	IdleWatchdog IdleWatchdogConfig `yaml:"idle_watchdog"`
+}
+
+// IdleWatchdogConfig controls the inactivity timer.
+type IdleWatchdogConfig struct {
+	Enabled *bool  `yaml:"enabled,omitempty"`
+	Timeout string `yaml:"timeout,omitempty"`
 }
 
 // Config holds the runtime configuration for Lattice.
@@ -147,11 +166,15 @@ func InitLatticeDir(projectDir string) error {
 
 // NewConfig creates a new Config instance populated with project settings.
 func NewConfig(projectDir string) (*Config, error) {
-	// LATTICE_ROOT must be set to the directory containing the lattice CLI source.
-	// This is where agents/, skills/, and defaults/ are located.
-	latticeRoot := os.Getenv("LATTICE_ROOT")
+	// LATTICE_ROOT should point to the lattice source tree with bundled assets. We
+	// first honor the environment variable, then fall back to the baked-in value
+	// supplied by build.sh via -ldflags.
+	latticeRoot := strings.TrimSpace(os.Getenv("LATTICE_ROOT"))
 	if latticeRoot == "" {
-		return nil, fmt.Errorf("LATTICE_ROOT environment variable is not set; see README.md for setup instructions")
+		latticeRoot = strings.TrimSpace(defaultLatticeRoot)
+	}
+	if latticeRoot == "" {
+		return nil, fmt.Errorf("LATTICE_ROOT environment variable is not set and no default was embedded; see README.md for setup instructions")
 	}
 
 	cfg := &Config{
@@ -291,6 +314,7 @@ func (pc *ProjectConfig) applyDefaults() {
 	if pc.CoreAgents == nil {
 		pc.CoreAgents = map[string]CoreAgentOverride{}
 	}
+	pc.Session.applyDefaults()
 }
 
 func (pc *ProjectConfig) normalize(base string) {
@@ -308,6 +332,7 @@ func (pc *ProjectConfig) normalize(base string) {
 	if len(pc.Workflows.Available) > 0 && !contains(pc.Workflows.Available, pc.Workflows.Default) {
 		pc.Workflows.Available = append(pc.Workflows.Available, pc.Workflows.Default)
 	}
+	pc.Session.normalize()
 }
 
 func (pc *ProjectConfig) validate() error {
@@ -326,6 +351,37 @@ func (pc *ProjectConfig) validate() error {
 	}
 	if strings.TrimSpace(pc.Workflows.Default) == "" {
 		return fmt.Errorf("workflows.default is required")
+	}
+	if err := pc.Session.validate(); err != nil {
+		return fmt.Errorf("session: %w", err)
+	}
+	return nil
+}
+
+func (sc *SessionConfig) applyDefaults() {
+	if sc == nil {
+		return
+	}
+	timeout := strings.TrimSpace(sc.IdleWatchdog.Timeout)
+	if timeout == "" {
+		sc.IdleWatchdog.Timeout = "5m"
+	}
+}
+
+func (sc *SessionConfig) normalize() {
+	if sc == nil {
+		return
+	}
+	sc.IdleWatchdog.Timeout = strings.TrimSpace(sc.IdleWatchdog.Timeout)
+}
+
+func (sc SessionConfig) validate() error {
+	timeout := strings.TrimSpace(sc.IdleWatchdog.Timeout)
+	if timeout == "" {
+		return nil
+	}
+	if _, err := time.ParseDuration(timeout); err != nil {
+		return fmt.Errorf("idle_watchdog.timeout: %w", err)
 	}
 	return nil
 }
@@ -428,4 +484,31 @@ func (c *Config) saveProjectConfig() error {
 		return fmt.Errorf("config: write project config: %w", err)
 	}
 	return nil
+}
+
+// IdleWatchdogSettings describes the derived runtime behavior for idle tracking.
+type IdleWatchdogSettings struct {
+	Enabled bool
+	Timeout time.Duration
+}
+
+// IdleWatchdogSettings returns the resolved idle watchdog behavior with defaults applied.
+func (c *Config) IdleWatchdogSettings() IdleWatchdogSettings {
+	settings := IdleWatchdogSettings{
+		Enabled: true,
+		Timeout: 5 * time.Minute,
+	}
+	if c == nil {
+		return settings
+	}
+	watchdog := c.Project.Session.IdleWatchdog
+	if watchdog.Enabled != nil {
+		settings.Enabled = *watchdog.Enabled
+	}
+	if timeout := strings.TrimSpace(watchdog.Timeout); timeout != "" {
+		if dur, err := time.ParseDuration(timeout); err == nil && dur > 0 {
+			settings.Timeout = dur
+		}
+	}
+	return settings
 }

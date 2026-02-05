@@ -96,6 +96,10 @@ type statusRefreshMsg struct {
 	err      error
 }
 
+type idleCheckMsg struct {
+	sequence int
+}
+
 type sessionItem struct {
 	Agent        string
 	Worktree     string
@@ -155,6 +159,12 @@ type App struct {
 	tmuxSession      string
 	statusWindowName string
 	statusReturnKey  string
+
+	idleWatchdogEnabled bool
+	idleWatchdogArmed   bool
+	idleTimeout         time.Duration
+	idleLastActivity    time.Time
+	idleSequence        int
 }
 
 // menuItem implements list.Item interface for our menu items
@@ -226,6 +236,9 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 		statusReturnKey:     statusReturnHotkey,
 		workflowReturnState: stateMainMenu,
 	}
+	settings := cfg.IdleWatchdogSettings()
+	app.idleWatchdogEnabled = settings.Enabled
+	app.idleTimeout = settings.Timeout
 	for _, opt := range opts {
 		if opt != nil {
 			opt(app)
@@ -425,23 +438,25 @@ func (a *App) logProgress(status string) {
 
 // Init is called once when the program starts.
 func (a *App) Init() tea.Cmd {
-	return a.fetchStatusSnapshot()
+	return tea.Batch(a.fetchStatusSnapshot(), a.armIdleWatchdog())
 }
 
 // Update is called when a message is received.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var idleActivityCmd tea.Cmd
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
+		idleActivityCmd = a.idleActivityCmd()
 		a.width = msg.Width
 		a.height = msg.Height
 		a.mainMenu.SetSize(max(0, msg.Width-6), max(0, msg.Height-10))
 		workflowHeight := a.workflowSelectionHeight()
 		a.workflowMenu.SetSize(max(0, msg.Width-6), workflowHeight)
 		if a.state == stateCommissionWork && a.workflowView != nil {
-			return a, a.workflowView.Update(msg)
+			return a, tea.Batch(a.workflowView.Update(msg), idleActivityCmd)
 		}
-		return a, nil
+		return a, idleActivityCmd
 
 	case statusRefreshMsg:
 		if msg.err != nil {
@@ -463,22 +478,36 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workflowFinishedMsg:
 		return a.handleWorkflowFinished(msg)
 
+	case idleCheckMsg:
+		if msg.sequence != a.idleSequence || !a.shouldTrackIdle() {
+			return a, nil
+		}
+		label := humanizeDuration(a.idleTimeout)
+		if strings.TrimSpace(label) == "" {
+			label = a.idleTimeout.String()
+		}
+		a.statusMsg = fmt.Sprintf("Idle %s · closing session", label)
+		a.logInfo("Idle watchdog triggered after %s of inactivity", a.idleTimeout)
+		return a, tea.Quit
+
 	case tea.KeyMsg:
 		key := msg.String()
+		idleActivityCmd = a.idleActivityCmd()
 		switch key {
 		case "ctrl+c":
-			return a, tea.Quit
+			return a, tea.Batch(tea.Quit, idleActivityCmd)
 		case "q":
 			if a.state == stateMainMenu {
-				return a, tea.Quit
+				return a, tea.Batch(tea.Quit, idleActivityCmd)
 			}
 		case "esc":
 			if a.state != stateMainMenu {
-				return a.returnToMainMenu()
+				model, cmd := a.returnToMainMenu()
+				return model, tea.Batch(cmd, idleActivityCmd)
 			}
 		case "r":
 			a.statusMsg = "Refreshing status board..."
-			return a, a.fetchStatusSnapshot()
+			return a, tea.Batch(a.fetchStatusSnapshot(), idleActivityCmd)
 		case "tab":
 			if a.state == stateMainMenu {
 				if a.boardFocus == focusMenu && len(a.sessionItems) > 0 {
@@ -500,27 +529,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if a.sessionSelection > 0 {
 					a.sessionSelection--
 				}
-				return a, nil
+				return a, idleActivityCmd
 			}
 		case "down", "j":
 			if a.state == stateMainMenu && a.boardFocus == focusSessions && len(a.sessionItems) > 0 {
 				if a.sessionSelection < len(a.sessionItems)-1 {
 					a.sessionSelection++
 				}
-				return a, nil
+				return a, idleActivityCmd
 			}
 		case "enter":
 			switch a.state {
 			case stateWorkflowSelect:
-				return a.confirmWorkflowSelection()
+				model, cmd := a.confirmWorkflowSelection()
+				return model, tea.Batch(cmd, idleActivityCmd)
 			case stateMainMenu:
 				if a.boardFocus == focusSessions {
 					if cmd := a.openSelectedSessionWindow(); cmd != nil {
-						return a, cmd
+						return a, tea.Batch(cmd, idleActivityCmd)
 					}
-					return a, nil
+					return a, idleActivityCmd
 				}
-				return a.handleMainMenuSelection()
+				model, cmd := a.handleMainMenuSelection()
+				return model, tea.Batch(cmd, idleActivityCmd)
 			}
 		}
 
@@ -548,6 +579,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+	}
+	if idleActivityCmd != nil {
+		cmds = append(cmds, idleActivityCmd)
 	}
 
 	return a, tea.Batch(cmds...)
@@ -635,6 +669,7 @@ func (a *App) startWorkflowRun(resume bool) (tea.Model, tea.Cmd) {
 	a.workflowReturnState = a.state
 	a.state = stateCommissionWork
 	a.pendingWorkflowResume = false
+	a.disarmIdleWatchdog()
 	a.workflowView = newWorkflowView(a, a.activeWorkflowID())
 	cmd := a.workflowView.Init(resume)
 	return a, cmd
@@ -652,7 +687,7 @@ func (a *App) returnToMainMenu() (tea.Model, tea.Cmd) {
 	a.mainMenu.SetItems(buildMainMenu(a.workflow))
 	a.refreshWorkflowMenu()
 
-	return a, nil
+	return a, a.armIdleWatchdog()
 }
 
 func (a *App) handleWorkflowFinished(msg workflowFinishedMsg) (tea.Model, tea.Cmd) {
@@ -1144,4 +1179,72 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (a *App) armIdleWatchdog() tea.Cmd {
+	if a == nil {
+		return nil
+	}
+	if !a.idleWatchdogEnabled || a.idleTimeout <= 0 || !a.idleWatchdogEligible() {
+		a.idleWatchdogArmed = false
+		return nil
+	}
+	a.idleWatchdogArmed = true
+	a.idleLastActivity = time.Now()
+	a.idleSequence++
+	return a.scheduleIdleCheck()
+}
+
+func (a *App) disarmIdleWatchdog() {
+	if a == nil {
+		return
+	}
+	a.idleWatchdogArmed = false
+	a.idleSequence++
+}
+
+func (a *App) idleActivityCmd() tea.Cmd {
+	if !a.shouldTrackIdle() {
+		return nil
+	}
+	a.idleLastActivity = time.Now()
+	a.idleSequence++
+	return a.scheduleIdleCheck()
+}
+
+func (a *App) shouldTrackIdle() bool {
+	if a == nil {
+		return false
+	}
+	if !a.idleWatchdogEnabled || !a.idleWatchdogArmed || a.idleTimeout <= 0 {
+		return false
+	}
+	return a.idleWatchdogEligible()
+}
+
+func (a *App) idleWatchdogEligible() bool {
+	if a == nil {
+		return false
+	}
+	switch a.state {
+	case stateMainMenu, stateWorkflowSelect, stateViewAgents:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *App) scheduleIdleCheck() tea.Cmd {
+	if !a.shouldTrackIdle() {
+		return nil
+	}
+	deadline := a.idleLastActivity.Add(a.idleTimeout)
+	wait := time.Until(deadline)
+	if wait <= 0 {
+		wait = 100 * time.Millisecond
+	}
+	seq := a.idleSequence
+	return tea.Tick(wait, func(time.Time) tea.Msg {
+		return idleCheckMsg{sequence: seq}
+	})
 }
