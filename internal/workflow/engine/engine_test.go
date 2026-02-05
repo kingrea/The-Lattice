@@ -57,6 +57,35 @@ func TestEngineResumeRefreshesCompletion(t *testing.T) {
 	}
 }
 
+func TestEngineResumeClearsCompletedRunning(t *testing.T) {
+	eng, repo, ctx, stubs, def := newEngineHarness(t)
+	stubs["plan"].setComplete(false)
+	if _, err := eng.Start(ctx, StartRequest{Definition: def}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := eng.Claim(ctx, ClaimRequest{Modules: []string{"anchor-plan"}, Limit: 1}); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	stubs["plan"].setComplete(true)
+	state, err := eng.Resume(ctx, ResumeRequest{})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if len(state.Runtime.Running) != 0 {
+		t.Fatalf("expected running cleared after completion, got %+v", state.Runtime.Running)
+	}
+	if len(state.Runnable) == 0 || state.Runnable[0] != "module-build" {
+		t.Fatalf("expected module-build runnable, got %+v", state.Runnable)
+	}
+	stored, err := repo.Load()
+	if err != nil {
+		t.Fatalf("load repo: %v", err)
+	}
+	if len(stored.Runtime.Running) != 0 {
+		t.Fatalf("expected persisted running cleared, got %+v", stored.Runtime.Running)
+	}
+}
+
 func TestEngineUpdateRecordsResultsAndFailures(t *testing.T) {
 	eng, _, ctx, stubs, def := newEngineHarness(t)
 	stubs["plan"].setComplete(true)

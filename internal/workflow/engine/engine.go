@@ -169,6 +169,7 @@ func (e *Engine) buildState(ctx *module.ModuleContext, def workflow.WorkflowDefi
 		return State{}, err
 	}
 	nodes := summarizeNodes(res, runs)
+	runtime.Running = dropCompletedRunning(runtime.Running, nodes)
 	status, reason := deriveEngineStatus(nodes, runtime, runs)
 	state := State{
 		WorkflowID:   def.ID,

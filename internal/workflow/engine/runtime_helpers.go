@@ -5,6 +5,7 @@ import (
 
 	"github.com/kingrea/The-Lattice/internal/module"
 	"github.com/kingrea/The-Lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/workflow/resolver"
 )
 
 func applyWorkflowRuntime(def workflow.WorkflowDefinition, runtime EngineRuntime) EngineRuntime {
@@ -43,6 +44,32 @@ func releaseRunning(running []string, updates []ModuleStatusUpdate) []string {
 	filtered := make([]string, 0, len(running))
 	for _, id := range running {
 		if _, drop := released[id]; drop {
+			continue
+		}
+		filtered = append(filtered, id)
+	}
+	return filtered
+}
+
+func dropCompletedRunning(running []string, nodes []ModuleStatus) []string {
+	if len(running) == 0 || len(nodes) == 0 {
+		return running
+	}
+	completed := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		if node.ID == "" {
+			continue
+		}
+		if node.State == resolver.NodeStateComplete {
+			completed[node.ID] = struct{}{}
+		}
+	}
+	if len(completed) == 0 {
+		return running
+	}
+	filtered := make([]string, 0, len(running))
+	for _, id := range running {
+		if _, done := completed[id]; done {
 			continue
 		}
 		filtered = append(filtered, id)
