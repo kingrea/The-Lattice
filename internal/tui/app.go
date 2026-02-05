@@ -413,7 +413,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.mainMenu.SetSize(max(0, msg.Width-6), max(0, msg.Height-10))
-		a.workflowMenu.SetSize(max(0, msg.Width-6), max(0, msg.Height-10))
+		workflowHeight := a.workflowSelectionHeight()
+		a.workflowMenu.SetSize(max(0, msg.Width-6), workflowHeight)
 		if a.state == stateCommissionWork && a.workflowView != nil {
 			return a, a.workflowView.Update(msg)
 		}
@@ -568,7 +569,7 @@ func (a *App) beginWorkflowSelection(resume bool) (tea.Model, tea.Cmd) {
 	a.pendingWorkflowResume = resume
 	a.boardFocus = focusMenu
 	if a.width > 0 && a.height > 0 {
-		a.workflowMenu.SetSize(max(0, a.width-6), max(0, a.height-10))
+		a.workflowMenu.SetSize(max(0, a.width-6), a.workflowSelectionHeight())
 	}
 	a.statusMsg = "Select a workflow to launch"
 	return a, nil
@@ -643,6 +644,9 @@ func (a *App) View() string {
 	}
 	if a.state == stateMainMenu && a.boardFocus == focusMenu {
 		a.mainMenu.SetSize(max(20, leftWidth-4), max(10, a.height-10))
+	}
+	if a.state == stateWorkflowSelect {
+		a.workflowMenu.SetSize(max(20, leftWidth-4), a.workflowSelectionHeight())
 	}
 	var content string
 	switch a.state {
@@ -1010,6 +1014,17 @@ func hotkeyLabel(key string) string {
 		return fmt.Sprintf("Alt+%s", strings.ToUpper(strings.TrimPrefix(key, "M-")))
 	}
 	return strings.ToUpper(key)
+}
+
+func (a *App) workflowSelectionHeight() int {
+	if a == nil {
+		return 0
+	}
+	if a.height <= 0 {
+		return 0
+	}
+	const chromePadding = 18
+	return max(8, a.height-chromePadding)
 }
 
 func humanizeWorkflowID(value string) string {
