@@ -197,7 +197,10 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 	menuItems := buildMainMenu(wf)
 
 	// Create the list components
-	mainMenu := list.New(menuItems, list.NewDefaultDelegate(), 0, 0)
+	menuDelegate := list.NewDefaultDelegate()
+	menuDelegate.ShowDescription = false
+	menuDelegate.SetSpacing(0)
+	mainMenu := list.New(menuItems, menuDelegate, 0, 0)
 	mainMenu.Title = mainMenuHeading
 	mainMenu.SetShowStatusBar(false)
 	mainMenu.SetFilteringEnabled(false)
@@ -267,11 +270,15 @@ func buildMainMenu(wf *workflow.Workflow) []list.Item {
 }
 
 func (a *App) selectedMenuDetail() string {
-	item, ok := a.mainMenu.SelectedItem().(menuItem)
-	if !ok {
+	item := a.mainMenu.SelectedItem()
+	if item == nil {
 		return "Select an option to view details."
 	}
-	detail := strings.TrimSpace(item.Detail())
+	detailProvider, ok := item.(interface{ Detail() string })
+	if !ok {
+		return "Details unavailable for this option."
+	}
+	detail := strings.TrimSpace(detailProvider.Detail())
 	if detail == "" {
 		return "Details unavailable for this option."
 	}
