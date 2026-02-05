@@ -44,6 +44,7 @@ const (
 	statusWindowName     = "status"
 	statusReturnHotkey   = "M-s"
 	mainMenuHeading      = "⬡ THE LATTICE"
+	logPanelMaxLines     = 8
 )
 
 // WorkflowDefinitionLoader resolves workflow definitions for the engine-backed view.
@@ -757,7 +758,7 @@ func (a *App) renderLogPanel() string {
 	if a.logbook == nil {
 		return ""
 	}
-	lines := a.logbook.Tail(8)
+	lines, total := a.logbook.Tail(logPanelMaxLines)
 	if len(lines) == 0 {
 		return ""
 	}
@@ -765,19 +766,71 @@ func (a *App) renderLogPanel() string {
 	if fileName == "." || fileName == "" {
 		fileName = "log"
 	}
+	visible := padLogLines(lines, logPanelMaxLines)
+	scrollbar := logScrollbarSegments(total, logPanelMaxLines)
+	content := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#AAAAAA")).
+		Render(strings.Join(visible, "\n"))
+	scroll := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#5B8DEF")).
+		PaddingLeft(1).
+		Render(strings.Join(scrollbar, "\n"))
+	body := lipgloss.JoinHorizontal(lipgloss.Top, content, scroll)
 	head := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#5B8DEF")).
 		Render(fmt.Sprintf("LOG · %s", fileName))
-	body := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#AAAAAA")).
-		Render(strings.Join(lines, "\n"))
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#444444")).
 		Padding(0, 1).
 		Render(fmt.Sprintf("%s\n%s", head, body))
 	return box
+}
+
+func padLogLines(lines []string, height int) []string {
+	if height <= 0 {
+		return nil
+	}
+	if len(lines) >= height {
+		return append([]string(nil), lines...)
+	}
+	pad := make([]string, height)
+	start := height - len(lines)
+	copy(pad[start:], lines)
+	return pad
+}
+
+func logScrollbarSegments(total, height int) []string {
+	segments := make([]string, height)
+	if height <= 0 {
+		return segments
+	}
+	if total <= height {
+		for i := range segments {
+			segments[i] = "│"
+		}
+		return segments
+	}
+	knob := height * height / total
+	if height*height%total != 0 {
+		knob++
+	}
+	if knob < 1 {
+		knob = 1
+	}
+	if knob > height {
+		knob = height
+	}
+	start := height - knob
+	for i := range segments {
+		if i >= start {
+			segments[i] = "█"
+		} else {
+			segments[i] = "│"
+		}
+	}
+	return segments
 }
 
 func (a *App) renderStatusBoard(mainContent string, leftWidth, rightWidth int) string {

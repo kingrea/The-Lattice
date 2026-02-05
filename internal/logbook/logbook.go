@@ -61,16 +61,17 @@ func (l *Logbook) Append(level Level, message string) {
 	_, _ = file.WriteString(line)
 }
 
-// Tail returns up to maxLines of the most recent log entries.
-func (l *Logbook) Tail(maxLines int) []string {
+// Tail returns up to maxLines of the most recent log entries along with the
+// total number of entries recorded.
+func (l *Logbook) Tail(maxLines int) ([]string, int) {
 	if l == nil || maxLines <= 0 {
-		return nil
+		return nil, 0
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	file, err := os.Open(l.path)
 	if err != nil {
-		return nil
+		return nil, 0
 	}
 	defer file.Close()
 
@@ -79,13 +80,14 @@ func (l *Logbook) Tail(maxLines int) []string {
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
-	if len(lines) == 0 {
-		return nil
+	total := len(lines)
+	if total == 0 {
+		return nil, 0
 	}
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
+	if total > maxLines {
+		lines = lines[total-maxLines:]
 	}
-	return lines
+	return lines, total
 }
 
 // Info appends an informational entry.
