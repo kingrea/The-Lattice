@@ -3,7 +3,7 @@ package module
 import (
 	"fmt"
 
-	"github.com/yourusername/lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/artifact"
 )
 
 // Info describes a module's identity and intent.

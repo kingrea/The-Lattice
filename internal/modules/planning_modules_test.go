@@ -5,16 +5,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yourusername/lattice/internal/artifact"
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/modules/action_plan"
-	"github.com/yourusername/lattice/internal/modules/bead_creation"
-	"github.com/yourusername/lattice/internal/modules/consolidation"
-	"github.com/yourusername/lattice/internal/modules/parallel_reviews"
-	"github.com/yourusername/lattice/internal/modules/staff_incorporate"
-	"github.com/yourusername/lattice/internal/modules/staff_review"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/modules/action_plan"
+	"github.com/kingrea/The-Lattice/internal/modules/bead_creation"
+	"github.com/kingrea/The-Lattice/internal/modules/consolidation"
+	"github.com/kingrea/The-Lattice/internal/modules/parallel_reviews"
+	"github.com/kingrea/The-Lattice/internal/modules/staff_incorporate"
+	"github.com/kingrea/The-Lattice/internal/modules/staff_review"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 func TestActionPlanModuleWritesMetadata(t *testing.T) {

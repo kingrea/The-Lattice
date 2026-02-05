@@ -129,6 +129,7 @@ func InitLatticeDir(projectDir string) error {
 		filepath.Join(latticeDir, "agents", "specialists"),
 		filepath.Join(latticeDir, "skills"),
 		filepath.Join(latticeDir, "worktree"),
+		filepath.Join(latticeDir, "modules"),
 	}
 
 	for _, dir := range dirs {

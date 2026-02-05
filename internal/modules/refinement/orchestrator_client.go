@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/orchestrator"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/orchestrator"
 )
 
 type orchestratorClient interface {

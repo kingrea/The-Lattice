@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 var errNoTrackedSessions = errors.New("no tracked sessions")

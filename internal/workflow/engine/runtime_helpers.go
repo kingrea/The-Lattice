@@ -3,8 +3,8 @@ package engine
 import (
 	"strings"
 
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 func applyWorkflowRuntime(def workflow.WorkflowDefinition, runtime EngineRuntime) EngineRuntime {

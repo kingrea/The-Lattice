@@ -3,7 +3,7 @@ package engine
 import (
 	"fmt"
 
-	"github.com/yourusername/lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/module"
 )
 
 // ClaimRequest asks the engine to reserve runnable modules for execution.

@@ -108,7 +108,7 @@ Two different places reference AGENTS.md with different expected locations. The 
 
 ```go
 // go.mod:1
-module github.com/yourusername/lattice
+module github.com/kingrea/The-Lattice
 ```
 
 This is a placeholder that should be changed to your actual module path (e.g., `github.com/your-actual-username/lattice` or a custom import path).
@@ -117,8 +117,8 @@ This is a placeholder that should be changed to your actual module path (e.g., `
 
 All imports use the placeholder:
 ```go
-import "github.com/yourusername/lattice/internal/config"
-import "github.com/yourusername/lattice/internal/orchestrator"
+import "github.com/kingrea/The-Lattice/internal/config"
+import "github.com/kingrea/The-Lattice/internal/orchestrator"
 // etc.
 ```
 
@@ -213,7 +213,7 @@ These are scattered across different directories and their presence/absence driv
    - Consider shipping "starter" denizens with the CLI
 
 6. **Fix Go module path**
-   - Change `github.com/yourusername/lattice` to actual path
+   - Change `github.com/kingrea/The-Lattice` to actual path
    - Update all imports
 
 7. **Add LATTICE_ROOT validation**

@@ -16,9 +16,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/yourusername/lattice/internal/modes"
-	"github.com/yourusername/lattice/internal/orchestrator"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/modes"
+	"github.com/kingrea/The-Lattice/internal/orchestrator"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 // Mode handles the work process phase

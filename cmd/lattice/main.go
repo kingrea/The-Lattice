@@ -17,9 +17,12 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/tui"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/logging"
+	"github.com/kingrea/The-Lattice/internal/tui"
 )
+
+var sessionLogger *logging.Logger
 
 func main() {
 	if handleValidateAgentCommand() {
@@ -28,8 +31,14 @@ func main() {
 	// Get the current working directory - this is the "project" we're working in
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
+		logErrorf("Error getting working directory: %v\n", err)
 		os.Exit(1)
+	}
+	sessionLogger, err = logging.New(cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: unable to initialize lattice log: %v\n", err)
+	} else {
+		defer sessionLogger.Close()
 	}
 
 	// Check if we're inside tmux already
@@ -42,13 +51,13 @@ func main() {
 
 	// We're inside tmux! Initialize the .lattice folder and start the TUI
 	if err := config.InitLatticeDir(cwd); err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing .lattice directory: %v\n", err)
+		logErrorf("Error initializing .lattice directory: %v\n", err)
 		os.Exit(1)
 	}
 
 	app, err := tui.NewApp(cwd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error preparing lattice app: %v\n", err)
+		logErrorf("Error preparing lattice app: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -62,7 +71,7 @@ func main() {
 
 	// Run blocks until the user quits
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+		logErrorf("Error running TUI: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -75,14 +84,14 @@ func startTmuxSession(workingDir string) {
 	// Get the path to our own executable so we can run it inside tmux
 	executable, err := os.Executable()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error finding executable: %v\n", err)
+		logErrorf("Error finding executable: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Make sure it's an absolute path
 	executable, err = filepath.Abs(executable)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error resolving executable path: %v\n", err)
+		logErrorf("Error resolving executable path: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -92,13 +101,13 @@ func startTmuxSession(workingDir string) {
 
 	if sessionExists {
 		// Session exists - attach to it
-		fmt.Printf("Attaching to existing lattice session...\n")
+		logInfof("Attaching to existing lattice session...\n")
 		cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to attach to tmux session %q: %v\n", sessionName, err)
+			logErrorf("Failed to attach to tmux session %q: %v\n", sessionName, err)
 			os.Exit(1)
 		}
 	} else {
@@ -106,14 +115,28 @@ func startTmuxSession(workingDir string) {
 		// -s: session name
 		// -c: starting directory
 		// The command at the end is what runs in the new session
-		fmt.Printf("Starting new lattice session...\n")
+		logInfof("Starting new lattice session...\n")
 		cmd := exec.Command("tmux", "new-session", "-s", sessionName, "-c", workingDir, executable)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to start tmux session %q: %v\n", sessionName, err)
+			logErrorf("Failed to start tmux session %q: %v\n", sessionName, err)
 			os.Exit(1)
 		}
+	}
+}
+
+func logInfof(format string, args ...any) {
+	fmt.Printf(format, args...)
+	if sessionLogger != nil {
+		sessionLogger.Printf(format, args...)
+	}
+}
+
+func logErrorf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
+	if sessionLogger != nil {
+		sessionLogger.Printf(format, args...)
 	}
 }

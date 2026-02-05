@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 // Kind captures the storage shape and serialization format for an artifact.

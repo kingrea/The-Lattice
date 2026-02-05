@@ -1,6 +1,6 @@
 package module
 
-import "github.com/yourusername/lattice/internal/artifact"
+import "github.com/kingrea/The-Lattice/internal/artifact"
 
 // Base provides common plumbing for modules (identity + IO contracts).
 type Base struct {

@@ -3,7 +3,7 @@ package module
 import (
 	"strings"
 
-	"github.com/yourusername/lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/artifact"
 )
 
 // Fingerprinter can be implemented by modules that expose deterministic

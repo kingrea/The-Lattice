@@ -1,11 +1,11 @@
 package module
 
 import (
-	"github.com/yourusername/lattice/internal/artifact"
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/logbook"
-	"github.com/yourusername/lattice/internal/orchestrator"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/logbook"
+	"github.com/kingrea/The-Lattice/internal/orchestrator"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 // ModuleContext carries shared runtime dependencies into every module.

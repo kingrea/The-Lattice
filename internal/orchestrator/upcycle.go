@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourusername/lattice/internal/skills"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/skills"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 // UpCycleConfig tunes the orchestration of active work sessions.

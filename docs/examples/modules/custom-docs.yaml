@@ -1,0 +1,18 @@
+id: custom-docs
+name: Custom Docs
+description: Prompt an operator to capture bespoke documentation.
+version: 1.0.0
+skill:
+  slug: lattice-planning
+  prompt: |
+    Load {{ .SkillPath }} and interview the user.
+    Save every result to {{ .WorkflowDir }}/plan/CUSTOM.md.
+  env:
+    CUSTOM_NOTEBOOK: "{{ .WorkflowDir }}/plan"
+  variables:
+    reviewer: Dr. Rivera
+inputs:
+  - artifact: commission-doc
+outputs:
+  - artifact: commission-doc
+    optional: false

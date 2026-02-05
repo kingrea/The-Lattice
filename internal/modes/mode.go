@@ -7,10 +7,10 @@ package modes
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/logbook"
-	"github.com/yourusername/lattice/internal/orchestrator"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/logbook"
+	"github.com/kingrea/The-Lattice/internal/orchestrator"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 // ModeContext provides shared context for all modes

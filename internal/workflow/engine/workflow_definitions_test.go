@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 var workflowsDir = filepath.Join("..", "..", "..", "workflows")

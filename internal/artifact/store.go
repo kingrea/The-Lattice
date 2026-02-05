@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 // Store manages artifact IO rooted at the workflow directory.

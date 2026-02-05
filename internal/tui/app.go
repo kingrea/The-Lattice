@@ -22,11 +22,11 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/logbook"
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/orchestrator"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/logbook"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/orchestrator"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 // appState represents which "screen" we're on
@@ -61,7 +61,7 @@ func WithWorkflowDefinitionLoader(loader WorkflowDefinitionLoader) AppOption {
 }
 
 // WithModuleRegistryFactory allows tests to inject custom module registries.
-func WithModuleRegistryFactory(factory func() *module.Registry) AppOption {
+func WithModuleRegistryFactory(factory func(*config.Config) (*module.Registry, error)) AppOption {
 	return func(a *App) {
 		if factory != nil {
 			a.registryFactory = factory
@@ -125,7 +125,7 @@ type App struct {
 	logbook      *logbook.Logbook
 
 	workflowLoader        WorkflowDefinitionLoader
-	registryFactory       func() *module.Registry
+	registryFactory       func(*config.Config) (*module.Registry, error)
 	workflowView          *workflowView
 	workflowMenu          list.Model
 	workflowChoices       []workflowOption

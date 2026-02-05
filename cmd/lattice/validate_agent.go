@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yourusername/lattice/internal/contracts"
+	"github.com/kingrea/The-Lattice/internal/contracts"
 )
 
 func handleValidateAgentCommand() bool {
@@ -12,12 +12,12 @@ func handleValidateAgentCommand() bool {
 		return false
 	}
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "Usage: lattice validate-agent /path/to/agent.yaml")
+		logErrorf("Usage: lattice validate-agent /path/to/agent.yaml\n")
 		os.Exit(2)
 	}
 	report, err := contracts.ValidateAgentFile(os.Args[2])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Validation failed: %v\n", err)
+		logErrorf("Validation failed: %v\n", err)
 		os.Exit(1)
 	}
 	if report.IsValid() {

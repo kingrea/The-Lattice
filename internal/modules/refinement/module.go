@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/yourusername/lattice/internal/artifact"
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/modules/runtime"
-	"github.com/yourusername/lattice/internal/orchestrator"
+	"github.com/kingrea/The-Lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/modules/runtime"
+	"github.com/kingrea/The-Lattice/internal/orchestrator"
 )
 
 const (

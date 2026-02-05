@@ -10,12 +10,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/modules"
-	"github.com/yourusername/lattice/internal/workflow"
-	"github.com/yourusername/lattice/internal/workflow/engine"
-	"github.com/yourusername/lattice/internal/workflow/scheduler"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/modules"
+	"github.com/kingrea/The-Lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/workflow/engine"
+	"github.com/kingrea/The-Lattice/internal/workflow/scheduler"
+	"github.com/kingrea/The-Lattice/plugins"
 )
 
 const engineRefreshInterval = 5 * time.Second
@@ -36,7 +37,7 @@ type workflowView struct {
 	manualGates     map[string]scheduler.ManualGateState
 	targets         []string
 	loader          WorkflowDefinitionLoader
-	registryFactory func() *module.Registry
+	registryFactory func(*config.Config) (*module.Registry, error)
 }
 
 type workflowInitMsg struct {
@@ -261,7 +262,11 @@ func (v *workflowView) ensureRuntime() error {
 		if factory == nil {
 			factory = defaultModuleRegistryFactory
 		}
-		v.registry = factory()
+		reg, err := factory(v.app.config)
+		if err != nil {
+			return err
+		}
+		v.registry = reg
 	}
 	if v.engine == nil {
 		repo := engine.NewRepository(v.app.workflow)
@@ -623,10 +628,13 @@ func cloneManualGates(values map[string]scheduler.ManualGateState) map[string]sc
 	return dup
 }
 
-func defaultModuleRegistryFactory() *module.Registry {
+func defaultModuleRegistryFactory(cfg *config.Config) (*module.Registry, error) {
 	reg := module.NewRegistry()
 	modules.RegisterBuiltins(reg)
-	return reg
+	if err := plugins.RegisterSkillPlugins(reg, cfg); err != nil {
+		return nil, err
+	}
+	return reg, nil
 }
 
 func defaultWorkflowLoader(cfg *config.Config, workflowID string) (workflow.WorkflowDefinition, error) {

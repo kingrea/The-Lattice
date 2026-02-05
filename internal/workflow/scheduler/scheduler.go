@@ -3,7 +3,7 @@ package scheduler
 import (
 	"fmt"
 
-	"github.com/yourusername/lattice/internal/workflow/resolver"
+	"github.com/kingrea/The-Lattice/internal/workflow/resolver"
 )
 
 // Selector exposes the minimal contract the workflow engine needs to request

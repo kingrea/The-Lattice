@@ -9,11 +9,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/yourusername/lattice/internal/artifact"
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/workflow"
-	"github.com/yourusername/lattice/internal/workflow/engine"
+	"github.com/kingrea/The-Lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/workflow/engine"
 )
 
 func TestWorkflowStartAndResume(t *testing.T) {
@@ -146,12 +146,12 @@ func newTestApp(t *testing.T, projectDir string, opts ...AppOption) *App {
 			},
 		}, nil
 	}
-	factory := func() *module.Registry {
+	factory := func(*config.Config) (*module.Registry, error) {
 		reg := module.NewRegistry()
 		reg.MustRegister("stub-alpha", func(module.Config) (module.Module, error) {
 			return &stubModule{id: "stub-alpha"}, nil
 		})
-		return reg
+		return reg, nil
 	}
 	baseOpts := []AppOption{WithWorkflowDefinitionLoader(loader), WithModuleRegistryFactory(factory)}
 	baseOpts = append(baseOpts, opts...)

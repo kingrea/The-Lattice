@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/yourusername/lattice/internal/artifact"
-	"github.com/yourusername/lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/module"
 )
 
 // MetadataOption customizes the metadata written for an artifact.

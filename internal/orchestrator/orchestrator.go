@@ -23,9 +23,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/yourusername/lattice/internal/community"
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/skills"
+	"github.com/kingrea/The-Lattice/internal/community"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/skills"
 )
 
 // Agent represents a denizen CV

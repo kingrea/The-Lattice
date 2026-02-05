@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yourusername/lattice/internal/artifact"
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/orchestrator"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/orchestrator"
+	"github.com/kingrea/The-Lattice/internal/workflow"
 )
 
 func TestModuleRunGeneratesOutputs(t *testing.T) {

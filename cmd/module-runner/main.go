@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/lattice/internal/artifact"
-	"github.com/yourusername/lattice/internal/config"
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/modules"
-	"github.com/yourusername/lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/modules"
+	"github.com/kingrea/The-Lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/plugins"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,6 +58,9 @@ func main() {
 	}
 	reg := module.NewRegistry()
 	modules.RegisterBuiltins(reg)
+	if err := plugins.RegisterSkillPlugins(reg, cfg); err != nil {
+		die("load plugins: %v", err)
+	}
 	cfgOverrides, err := buildModuleConfig(*configFile, sets)
 	if err != nil {
 		die("load config overrides: %v", err)

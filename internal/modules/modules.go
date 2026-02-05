@@ -1,20 +1,20 @@
 package modules
 
 import (
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/modules/action_plan"
-	"github.com/yourusername/lattice/internal/modules/anchor_docs"
-	"github.com/yourusername/lattice/internal/modules/bead_creation"
-	"github.com/yourusername/lattice/internal/modules/consolidation"
-	"github.com/yourusername/lattice/internal/modules/hiring"
-	"github.com/yourusername/lattice/internal/modules/orchestrator_selection"
-	"github.com/yourusername/lattice/internal/modules/parallel_reviews"
-	"github.com/yourusername/lattice/internal/modules/refinement"
-	"github.com/yourusername/lattice/internal/modules/release"
-	"github.com/yourusername/lattice/internal/modules/solo_work"
-	"github.com/yourusername/lattice/internal/modules/staff_incorporate"
-	"github.com/yourusername/lattice/internal/modules/staff_review"
-	"github.com/yourusername/lattice/internal/modules/work_process"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/modules/action_plan"
+	"github.com/kingrea/The-Lattice/internal/modules/anchor_docs"
+	"github.com/kingrea/The-Lattice/internal/modules/bead_creation"
+	"github.com/kingrea/The-Lattice/internal/modules/consolidation"
+	"github.com/kingrea/The-Lattice/internal/modules/hiring"
+	"github.com/kingrea/The-Lattice/internal/modules/orchestrator_selection"
+	"github.com/kingrea/The-Lattice/internal/modules/parallel_reviews"
+	"github.com/kingrea/The-Lattice/internal/modules/refinement"
+	"github.com/kingrea/The-Lattice/internal/modules/release"
+	"github.com/kingrea/The-Lattice/internal/modules/solo_work"
+	"github.com/kingrea/The-Lattice/internal/modules/staff_incorporate"
+	"github.com/kingrea/The-Lattice/internal/modules/staff_review"
+	"github.com/kingrea/The-Lattice/internal/modules/work_process"
 )
 
 // RegisterBuiltins installs all of the built-in module factories into the

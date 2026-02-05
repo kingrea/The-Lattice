@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/lattice/internal/module"
-	"github.com/yourusername/lattice/internal/workflow"
-	"github.com/yourusername/lattice/internal/workflow/resolver"
-	"github.com/yourusername/lattice/internal/workflow/scheduler"
+	"github.com/kingrea/The-Lattice/internal/module"
+	"github.com/kingrea/The-Lattice/internal/workflow"
+	"github.com/kingrea/The-Lattice/internal/workflow/resolver"
+	"github.com/kingrea/The-Lattice/internal/workflow/scheduler"
 )
 
 // Engine coordinates the resolver and scheduler while persisting workflow state.
