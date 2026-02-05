@@ -48,7 +48,7 @@ lattice
 │  ┌──────────────────────────────────────────────┐  │
 │  │  Window 0: "terminal"                        │  │
 │  │  ┌────────────────────────────────────────┐  │  │
-│  │  │  ⬡ THE TERMINAL                        │  │  │
+│  │  │  ⬡ THE LATTICE                         │  │  │
 │  │  │                                        │  │  │
 │  │  │  > Commission Work                     │  │  │
 │  │  │    View Agents                         │  │  │
@@ -98,6 +98,8 @@ lattice
 │                                                    │
 └────────────────────────────────────────────────────┘
 ```
+
+The diagram above reflects the updated `⬡ THE LATTICE` banner shown in the TUI.
 
 ## Default Module Workflow
 

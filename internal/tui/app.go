@@ -43,6 +43,7 @@ const (
 	boardRefreshInterval = 3 * time.Second
 	statusWindowName     = "status"
 	statusReturnHotkey   = "M-s"
+	mainMenuHeading      = "⬡ THE LATTICE"
 )
 
 // WorkflowDefinitionLoader resolves workflow definitions for the engine-backed view.
@@ -162,8 +163,9 @@ type menuItem struct {
 }
 
 func (i menuItem) Title() string       { return i.title }
-func (i menuItem) Description() string { return i.desc }
+func (i menuItem) Description() string { return "" }
 func (i menuItem) FilterValue() string { return i.title }
+func (i menuItem) Detail() string      { return i.desc }
 
 type workflowOption struct {
 	id    string
@@ -196,7 +198,7 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 
 	// Create the list components
 	mainMenu := list.New(menuItems, list.NewDefaultDelegate(), 0, 0)
-	mainMenu.Title = "⬡ THE TERMINAL"
+	mainMenu.Title = mainMenuHeading
 	mainMenu.SetShowStatusBar(false)
 	mainMenu.SetFilteringEnabled(false)
 	workflowMenu := list.New(nil, list.NewDefaultDelegate(), 0, 0)
@@ -262,6 +264,18 @@ func buildMainMenu(wf *workflow.Workflow) []list.Item {
 	)
 
 	return items
+}
+
+func (a *App) selectedMenuDetail() string {
+	item, ok := a.mainMenu.SelectedItem().(menuItem)
+	if !ok {
+		return "Select an option to view details."
+	}
+	detail := strings.TrimSpace(item.Detail())
+	if detail == "" {
+		return "Details unavailable for this option."
+	}
+	return detail
 }
 
 func (a *App) refreshWorkflowMenu() {
@@ -698,7 +712,7 @@ func (a *App) renderStatusBoard(mainContent string, leftWidth, rightWidth int) s
 		Bold(true).
 		Foreground(lipgloss.Color("#FF6B6B")).
 		MarginBottom(1).
-		Render("⬡ LATTICE")
+		Render(mainMenuHeading)
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		a.renderPhasePanel(leftWidth-4),
 		"",
@@ -774,10 +788,35 @@ func (a *App) renderPhasePanel(width int) string {
 }
 
 func (a *App) renderMainArea(content string, width int) string {
+	if a.state == stateMainMenu {
+		return a.renderMainMenuContent(width)
+	}
 	if strings.TrimSpace(content) == "" {
 		content = "Ready to commission work."
 	}
 	return lipgloss.NewStyle().Width(max(20, width)).Render(content)
+}
+
+func (a *App) renderMainMenuContent(width int) string {
+	menuWidth := max(20, width*3/5)
+	detailWidth := max(20, width-menuWidth-3)
+	stackVertical := detailWidth < 24
+	availableHeight := max(10, a.height-12)
+	a.mainMenu.SetSize(max(20, menuWidth), availableHeight)
+	menuView := lipgloss.NewStyle().
+		Width(max(20, menuWidth)).
+		Render(a.mainMenu.View())
+	detail := a.selectedMenuDetail()
+	detailBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Padding(0, 1).
+		Width(max(20, detailWidth)).
+		Render(detail)
+	if stackVertical {
+		return lipgloss.JoinVertical(lipgloss.Left, menuView, detailBox)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, menuView, detailBox)
 }
 
 func (a *App) renderWorkflowSelection() string {
