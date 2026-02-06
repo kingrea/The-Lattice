@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/eventbridge"
 	"github.com/kingrea/The-Lattice/internal/module"
 	"github.com/kingrea/The-Lattice/internal/modules"
 	"github.com/kingrea/The-Lattice/internal/workflow"
@@ -61,6 +62,11 @@ type workflowView struct {
 	loader          WorkflowDefinitionLoader
 	registryFactory func(*config.Config) (*module.Registry, error)
 	finished        bool
+	bridgeEnabled   bool
+	moduleEvents    map[string][]eventbridge.Event
+	moduleActivity  map[string]time.Time
+	moduleSubs      map[string]eventbridge.Subscription
+	eventLogLimit   int
 }
 
 type moduleLabel struct {
@@ -98,6 +104,12 @@ type workflowFinishedMsg struct {
 	Reason     string
 }
 
+type bridgeEventMsg struct {
+	moduleID string
+	event    eventbridge.Event
+	closed   bool
+}
+
 func newWorkflowView(app *App, workflowID string) *workflowView {
 	id := strings.TrimSpace(workflowID)
 	if id == "" {
@@ -107,10 +119,17 @@ func newWorkflowView(app *App, workflowID string) *workflowView {
 		id = "commission-work"
 	}
 	view := &workflowView{
-		app:         app,
-		workflowID:  id,
-		running:     map[string]struct{}{},
-		manualGates: map[string]scheduler.ManualGateState{},
+		app:            app,
+		workflowID:     id,
+		running:        map[string]struct{}{},
+		manualGates:    map[string]scheduler.ManualGateState{},
+		moduleEvents:   map[string][]eventbridge.Event{},
+		moduleActivity: map[string]time.Time{},
+		moduleSubs:     map[string]eventbridge.Subscription{},
+		eventLogLimit:  20,
+	}
+	if app != nil && app.orchestrator != nil {
+		view.bridgeEnabled = strings.TrimSpace(app.orchestrator.BridgeURL()) != "" && app.orchestrator.EventRouter() != nil
 	}
 	view.loader = app.workflowLoader
 	view.registryFactory = app.registryFactory
@@ -190,6 +209,19 @@ func (v *workflowView) Update(msg tea.Msg) tea.Cmd {
 			return cmd
 		}
 		return launch
+	case bridgeEventMsg:
+		if m.closed {
+			if sub, ok := v.moduleSubs[m.moduleID]; ok {
+				sub.Close()
+				delete(v.moduleSubs, m.moduleID)
+			}
+			return nil
+		}
+		v.appendBridgeEvent(m.moduleID, m.event)
+		if sub, ok := v.moduleSubs[m.moduleID]; ok {
+			return v.listenForBridgeEvent(m.moduleID, sub)
+		}
+		return nil
 	case tea.KeyMsg:
 		return v.handleKeyMsg(m)
 	default:
@@ -272,8 +304,48 @@ func (v *workflowView) renderModuleDetails(node engine.ModuleStatus) string {
 	if len(details) == 0 {
 		return moduleDetailStyle.Render("no additional details")
 	}
+	if v.bridgeEnabled {
+		if events := v.renderModuleEvents(node.ID); events != "" {
+			details = append(details, events)
+		}
+	}
 	body := strings.Join(details, "\n")
 	return moduleDetailStyle.Render(body)
+}
+
+func (v *workflowView) renderModuleEvents(moduleID string) string {
+	if !v.bridgeEnabled {
+		return ""
+	}
+	events := v.moduleEvents[moduleID]
+	if len(events) == 0 {
+		return moduleDetailStyle.Render("Bridge: no events yet")
+	}
+	start := 0
+	if len(events) > 5 {
+		start = len(events) - 5
+	}
+	rows := []string{"Bridge events:"}
+	for i := start; i < len(events); i++ {
+		rows = append(rows, v.formatBridgeEvent(events[i]))
+	}
+	return moduleDetailStyle.Render(strings.Join(rows, "\n"))
+}
+
+func (v *workflowView) formatBridgeEvent(event eventbridge.Event) string {
+	timestamp := event.ServerTime
+	if timestamp.IsZero() {
+		timestamp = time.Now()
+	}
+	label := friendlyLabel(event.Type)
+	snippet := strings.TrimSpace(string(event.Payload))
+	if len(snippet) > 64 {
+		snippet = snippet[:61] + "..."
+	}
+	if snippet != "" {
+		label = fmt.Sprintf("%s · %s", label, snippet)
+	}
+	return fmt.Sprintf("[%s] %s", timestamp.Format("15:04:05"), label)
 }
 
 func (v *workflowView) moduleLabelSpecs(node engine.ModuleStatus) []moduleLabel {
@@ -314,6 +386,13 @@ func (v *workflowView) moduleLabelSpecs(node engine.ModuleStatus) []moduleLabel 
 			label = fmt.Sprintf("Skipped (%s)", friendlyLabel(detail))
 		}
 		add(label, labelStyleSkipped)
+	}
+	if v.bridgeEnabled {
+		if ts, ok := v.moduleActivity[node.ID]; ok && time.Since(ts) < 15*time.Second {
+			add("Bridge Active", labelStyleRunning)
+		} else {
+			add("Bridge Idle", labelStyleDefault)
+		}
 	}
 	return specs
 }
@@ -659,6 +738,32 @@ func (v *workflowView) installDefinition(def workflow.WorkflowDefinition) {
 	}
 }
 
+func (v *workflowView) ensureBridgeSubscriptions() tea.Cmd {
+	if !v.bridgeEnabled || v.app == nil || v.app.orchestrator == nil {
+		return nil
+	}
+	if len(v.moduleRefs) == 0 {
+		return nil
+	}
+	router := v.app.orchestrator.EventRouter()
+	if router == nil {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for id := range v.moduleRefs {
+		if _, ok := v.moduleSubs[id]; ok {
+			continue
+		}
+		sub := router.Subscribe(id)
+		v.moduleSubs[id] = sub
+		cmds = append(cmds, v.listenForBridgeEvent(id, sub))
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
 func (v *workflowView) installRuntimeState(state engine.State) {
 	v.running = map[string]struct{}{}
 	for _, id := range state.Runtime.Running {
@@ -680,11 +785,53 @@ func (v *workflowView) installRuntimeState(state engine.State) {
 	}
 }
 
+func (v *workflowView) listenForBridgeEvent(moduleID string, sub eventbridge.Subscription) tea.Cmd {
+	return func() tea.Msg {
+		evt, ok := <-sub.Events
+		if !ok {
+			return bridgeEventMsg{moduleID: moduleID, closed: true}
+		}
+		return bridgeEventMsg{moduleID: moduleID, event: evt}
+	}
+}
+
+func (v *workflowView) appendBridgeEvent(moduleID string, event eventbridge.Event) {
+	if !v.bridgeEnabled {
+		return
+	}
+	if v.moduleEvents == nil {
+		v.moduleEvents = map[string][]eventbridge.Event{}
+	}
+	events := append(v.moduleEvents[moduleID], event)
+	if limit := v.eventLogLimit; limit > 0 && len(events) > limit {
+		events = events[len(events)-limit:]
+	}
+	v.moduleEvents[moduleID] = events
+	timestamp := event.ServerTime
+	if timestamp.IsZero() {
+		timestamp = time.Now()
+	}
+	if v.moduleActivity == nil {
+		v.moduleActivity = map[string]time.Time{}
+	}
+	v.moduleActivity[moduleID] = timestamp
+}
+
 func (v *workflowView) applyState(state engine.State) tea.Cmd {
 	v.state = state
 	v.installDefinition(state.Definition)
 	v.installRuntimeState(state)
-	return v.checkForCompletion()
+	var cmds []tea.Cmd
+	if cmd := v.ensureBridgeSubscriptions(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if finish := v.checkForCompletion(); finish != nil {
+		cmds = append(cmds, finish)
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 func (v *workflowView) checkForCompletion() tea.Cmd {
@@ -705,6 +852,7 @@ func (v *workflowView) workflowFinished(reason string) tea.Cmd {
 		return nil
 	}
 	v.finished = true
+	v.closeBridgeSubscriptions()
 	status := strings.TrimSpace(string(v.state.Status))
 	if status == "" {
 		status = "complete"
@@ -717,6 +865,13 @@ func (v *workflowView) workflowFinished(reason string) tea.Cmd {
 		Reason:     reason,
 	}
 	return func() tea.Msg { return msg }
+}
+
+func (v *workflowView) closeBridgeSubscriptions() {
+	for id, sub := range v.moduleSubs {
+		sub.Close()
+		delete(v.moduleSubs, id)
+	}
 }
 
 func (v *workflowView) runtimeOverrides() *engine.RuntimeOverrides {
