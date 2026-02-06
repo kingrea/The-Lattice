@@ -224,6 +224,13 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 			lb.Info("Event bridge listening at %s", bridgeServer.BaseURL())
 		}
 	}
+	if router != nil {
+		bridgeURL := ""
+		if bridgeServer != nil {
+			bridgeURL = bridgeServer.BaseURL()
+		}
+		orch.AttachEventBridge(bridgeURL, router)
+	}
 
 	// Build menu items based on workflow state
 	menuItems := buildMainMenu(wf)

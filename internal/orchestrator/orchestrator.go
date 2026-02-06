@@ -23,8 +23,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/google/uuid"
 	"github.com/kingrea/The-Lattice/internal/community"
 	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/eventbridge"
 	"github.com/kingrea/The-Lattice/internal/skills"
 )
 
@@ -87,8 +89,10 @@ type WorkErrorMsg struct {
 
 // Orchestrator manages the OpenCode process
 type Orchestrator struct {
-	config     *config.Config
-	windowName string
+	config      *config.Config
+	windowName  string
+	bridgeURL   string
+	eventRouter *eventbridge.Router
 }
 
 const (
@@ -116,6 +120,41 @@ func New(cfg *config.Config) *Orchestrator {
 		config:     cfg,
 		windowName: "opencode-worker",
 	}
+}
+
+// AttachEventBridge wires the HTTP bridge context into the orchestrator.
+func (o *Orchestrator) AttachEventBridge(url string, router *eventbridge.Router) {
+	if o == nil {
+		return
+	}
+	o.bridgeURL = strings.TrimSpace(url)
+	o.eventRouter = router
+}
+
+// BridgeURL returns the currently attached bridge base URL.
+func (o *Orchestrator) BridgeURL() string {
+	if o == nil {
+		return ""
+	}
+	return o.bridgeURL
+}
+
+// EventRouter exposes the shared router for module subscriptions.
+func (o *Orchestrator) EventRouter() *eventbridge.Router {
+	if o == nil {
+		return nil
+	}
+	return o.eventRouter
+}
+
+// OpenBridgeSubscription prepares a unique session ID and router subscription.
+func (o *Orchestrator) OpenBridgeSubscription(moduleID string) (string, eventbridge.Subscription) {
+	if o == nil || o.eventRouter == nil {
+		return "", eventbridge.Subscription{}
+	}
+	sessionID := uuid.NewString()
+	sub := o.eventRouter.Subscribe(moduleID)
+	return sessionID, sub
 }
 
 // StartWork returns a tea.Cmd that loads available denizen CVs.

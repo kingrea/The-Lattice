@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,23 +11,37 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
 	"github.com/kingrea/The-Lattice/internal/artifact"
+	"github.com/kingrea/The-Lattice/internal/eventbridge"
 	"github.com/kingrea/The-Lattice/internal/module"
 	"github.com/kingrea/The-Lattice/internal/skills"
 )
 
 type skillModule struct {
 	*module.Base
-	definition ModuleDefinition
-	inputs     []artifact.ArtifactRef
-	outputs    []artifact.ArtifactRef
-	inputIDs   []string
-	config     module.Config
-	terminal   skillTerminal
-	windowName string
+	definition      ModuleDefinition
+	inputs          []artifact.ArtifactRef
+	outputs         []artifact.ArtifactRef
+	inputIDs        []string
+	config          module.Config
+	terminal        skillTerminal
+	windowName      string
+	bridgeMu        sync.Mutex
+	bridgeSessionID string
+	bridgeSub       eventbridge.Subscription
+	bridgeComplete  bool
+	bridgeSuccess   bool
+	bridgeMessage   string
+}
+
+type sessionEndPayload struct {
+	Success bool   `json:"success"`
+	Reason  string `json:"reason"`
+	Error   string `json:"error,omitempty"`
 }
 
 func newSkillModule(def ModuleDefinition, overrides module.Config) (*skillModule, error) {
@@ -93,17 +108,129 @@ func (m *skillModule) Run(ctx *module.ModuleContext) (module.Result, error) {
 	if err := m.terminal.CreateWindow(window, ctx.Config.ProjectDir); err != nil {
 		return module.Result{Status: module.StatusFailed}, fmt.Errorf("skill-module: create tmux window: %w", err)
 	}
-	if err := m.terminal.SendOpenCode(window, prompt, m.definition.Skill.Env); err != nil {
+	env := cloneEnv(m.definition.Skill.Env)
+	sessionID, sub := m.prepareBridgeSession(ctx, env)
+	if err := m.terminal.SendOpenCode(window, prompt, env); err != nil {
 		m.terminal.KillWindow(window)
+		if sessionID != "" {
+			sub.Close()
+		}
 		return module.Result{Status: module.StatusFailed}, fmt.Errorf("skill-module: launch opencode: %w", err)
+	}
+	if sessionID != "" {
+		m.startBridgeWatcher(ctx, sub, sessionID)
 	}
 	m.windowName = window
 	return module.Result{Status: module.StatusNeedsInput, Message: fmt.Sprintf("%s running in %s", m.definition.ID, window)}, nil
 }
 
+func cloneEnv(env map[string]string) map[string]string {
+	if len(env) == 0 {
+		return map[string]string{}
+	}
+	copy := make(map[string]string, len(env))
+	for key, value := range env {
+		copy[key] = value
+	}
+	return copy
+}
+
+func (m *skillModule) prepareBridgeSession(ctx *module.ModuleContext, env map[string]string) (string, eventbridge.Subscription) {
+	if ctx == nil || ctx.Orchestrator == nil {
+		return "", eventbridge.Subscription{}
+	}
+	url := strings.TrimSpace(ctx.Orchestrator.BridgeURL())
+	router := ctx.Orchestrator.EventRouter()
+	if url == "" || router == nil {
+		return "", eventbridge.Subscription{}
+	}
+	sessionID, sub := ctx.Orchestrator.OpenBridgeSubscription(m.definition.ID)
+	if sessionID == "" {
+		return "", eventbridge.Subscription{}
+	}
+	env["LATTICE_BRIDGE_URL"] = url
+	env["LATTICE_SESSION_ID"] = sessionID
+	env["LATTICE_MODULE_ID"] = m.definition.ID
+	env["LATTICE_WORKFLOW_ID"] = strings.TrimSpace(ctx.WorkflowID)
+	env["LATTICE_BRIDGE_VERSION"] = fmt.Sprintf("%d", eventbridge.EventSchemaVersion)
+	return sessionID, sub
+}
+
+func (m *skillModule) startBridgeWatcher(ctx *module.ModuleContext, sub eventbridge.Subscription, sessionID string) {
+	m.bridgeMu.Lock()
+	m.bridgeSessionID = sessionID
+	m.bridgeSub = sub
+	m.bridgeComplete = false
+	m.bridgeSuccess = false
+	m.bridgeMessage = ""
+	m.bridgeMu.Unlock()
+	go func() {
+		for event := range sub.Events {
+			if event.SessionID != "" && event.SessionID != sessionID {
+				continue
+			}
+			m.consumeBridgeEvent(ctx, event)
+		}
+	}()
+}
+
+func (m *skillModule) consumeBridgeEvent(ctx *module.ModuleContext, event eventbridge.Event) {
+	switch strings.ToLower(strings.TrimSpace(event.Type)) {
+	case "session_end":
+		var payload sessionEndPayload
+		if len(event.Payload) > 0 {
+			_ = json.Unmarshal(event.Payload, &payload)
+		}
+		message := strings.TrimSpace(payload.Reason)
+		if !payload.Success && strings.TrimSpace(payload.Error) != "" {
+			message = strings.TrimSpace(payload.Error)
+		}
+		m.recordBridgeCompletion(payload.Success, message)
+		if ctx != nil && ctx.Logbook != nil {
+			if payload.Success {
+				ctx.Logbook.Info("%s session complete · %s", m.definition.ID, message)
+			} else {
+				ctx.Logbook.Error("%s session error · %s", m.definition.ID, message)
+			}
+		}
+		m.stopSession()
+	default:
+	}
+}
+
+func (m *skillModule) recordBridgeCompletion(success bool, message string) {
+	m.bridgeMu.Lock()
+	m.bridgeComplete = true
+	m.bridgeSuccess = success
+	m.bridgeMessage = message
+	m.bridgeMu.Unlock()
+	m.closeBridgeSubscription()
+}
+
+func (m *skillModule) bridgeStatus() (bool, bool, string) {
+	m.bridgeMu.Lock()
+	defer m.bridgeMu.Unlock()
+	return m.bridgeComplete, m.bridgeSuccess, m.bridgeMessage
+}
+
+func (m *skillModule) closeBridgeSubscription() {
+	m.bridgeMu.Lock()
+	sub := m.bridgeSub
+	m.bridgeSub = eventbridge.Subscription{}
+	m.bridgeSessionID = ""
+	m.bridgeMu.Unlock()
+	sub.Close()
+}
+
 func (m *skillModule) IsComplete(ctx *module.ModuleContext) (bool, error) {
 	if err := validateSkillContext(ctx); err != nil {
 		return false, err
+	}
+	if complete, success, message := m.bridgeStatus(); complete && !success {
+		if message == "" {
+			message = "bridge session reported failure"
+		}
+		return false, fmt.Errorf("skill-module: %s %s", m.definition.ID, message)
 	}
 	for _, ref := range m.outputs {
 		ready, err := m.ensureArtifact(ctx, ref)
@@ -178,11 +305,11 @@ func (m *skillModule) writeMetadata(ctx *module.ModuleContext, ref artifact.Arti
 }
 
 func (m *skillModule) stopSession() {
-	if m.windowName == "" {
-		return
+	if m.windowName != "" {
+		m.terminal.KillWindow(m.windowName)
+		m.windowName = ""
 	}
-	m.terminal.KillWindow(m.windowName)
-	m.windowName = ""
+	m.closeBridgeSubscription()
 }
 
 func (m *skillModule) resolveSkillPath(ctx *module.ModuleContext) (string, error) {

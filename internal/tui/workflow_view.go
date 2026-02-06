@@ -23,13 +23,24 @@ import (
 const engineRefreshInterval = 5 * time.Second
 
 var (
-	labelStyleReady   = lipgloss.NewStyle().Foreground(lipgloss.Color("#4CAF50")).Bold(true)
-	labelStyleBlocked = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B")).Bold(true)
-	labelStyleRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("#5B8DEF")).Bold(true)
-	labelStyleGate    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7B801")).Bold(true)
-	labelStyleSkipped = lipgloss.NewStyle().Foreground(lipgloss.Color("#999999"))
-	labelStyleDefault = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
-	detailTextStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0AEC0"))
+	labelStyleReady     = lipgloss.NewStyle().Foreground(lipgloss.Color("#4CAF50")).Bold(true)
+	labelStyleBlocked   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B")).Bold(true)
+	labelStyleRunning   = lipgloss.NewStyle().Foreground(lipgloss.Color("#5B8DEF")).Bold(true)
+	labelStyleGate      = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7B801")).Bold(true)
+	labelStyleSkipped   = lipgloss.NewStyle().Foreground(lipgloss.Color("#999999"))
+	labelStyleDefault   = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+	detailTextStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0AEC0"))
+	moduleLineStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")).Padding(0, 1)
+	moduleSelectedStyle = moduleLineStyle.Copy().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#5B8DEF")).
+				Background(lipgloss.Color("#0F111A")).
+				Bold(true)
+	moduleIndicatorStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563")).PaddingRight(1)
+	moduleIndicatorSelectedStyle = moduleIndicatorStyle.Copy().Foreground(lipgloss.Color("#5B8DEF"))
+	moduleTitleStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("#F9FAFB")).Bold(true)
+	moduleMetaStyle              = lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
+	moduleDetailStyle            = detailTextStyle.Copy().PaddingLeft(4)
 )
 
 type workflowView struct {
@@ -213,9 +224,12 @@ func (v *workflowView) View() string {
 }
 
 func (v *workflowView) renderModuleLine(idx int, node engine.ModuleStatus) string {
-	indicator := " "
+	indicator := moduleIndicatorStyle.Render("•")
+	container := moduleLineStyle
+	titleStyle := moduleTitleStyle
 	if idx == v.selection {
-		indicator = ">"
+		indicator = moduleIndicatorSelectedStyle.Render("❯")
+		container = moduleSelectedStyle
 	}
 	name := node.Name
 	if strings.TrimSpace(name) == "" {
@@ -229,7 +243,12 @@ func (v *workflowView) renderModuleLine(idx int, node engine.ModuleStatus) strin
 	for _, spec := range labelSpecs {
 		rendered = append(rendered, spec.style.Render(spec.text))
 	}
-	return fmt.Sprintf("%s %s · [%s]", indicator, name, strings.Join(rendered, ", "))
+	body := []string{titleStyle.Render(name)}
+	if badges := strings.Join(rendered, "  "); strings.TrimSpace(badges) != "" {
+		body = append(body, moduleMetaStyle.Render(badges))
+	}
+	stack := lipgloss.JoinVertical(lipgloss.Left, body...)
+	return container.Render(lipgloss.JoinHorizontal(lipgloss.Top, indicator, stack))
 }
 
 func (v *workflowView) renderModuleDetails(node engine.ModuleStatus) string {
@@ -251,10 +270,10 @@ func (v *workflowView) renderModuleDetails(node engine.ModuleStatus) string {
 		details = append(details, runLine)
 	}
 	if len(details) == 0 {
-		return detailTextStyle.Render("  no additional details")
+		return moduleDetailStyle.Render("no additional details")
 	}
-	body := "  " + strings.Join(details, "\n  ")
-	return detailTextStyle.Render(body)
+	body := strings.Join(details, "\n")
+	return moduleDetailStyle.Render(body)
 }
 
 func (v *workflowView) moduleLabelSpecs(node engine.ModuleStatus) []moduleLabel {
@@ -363,6 +382,7 @@ func (v *workflowView) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 func (v *workflowView) ensureRuntime() error {
 	if v.moduleCtx == nil {
 		v.moduleCtx = module.NewContext(v.app.config, v.app.workflow, v.app.orchestrator, v.app.logbook)
+		v.moduleCtx.WorkflowID = v.workflowID
 	}
 	if v.registry == nil {
 		factory := v.registryFactory

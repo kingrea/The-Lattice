@@ -12,6 +12,7 @@ import (
 type ModuleContext struct {
 	Config       *config.Config
 	Workflow     *workflow.Workflow
+	WorkflowID   string
 	Orchestrator *orchestrator.Orchestrator
 	Logbook      *logbook.Logbook
 	Artifacts    *artifact.Store
