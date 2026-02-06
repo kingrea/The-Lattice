@@ -20,6 +20,7 @@ const (
 	maxAgentStoryPoints     = 8
 	pluginAutoInstallEnv    = "LATTICE_PLUGIN_AUTO_INSTALL"
 	pluginManualInstallHint = "Install it manually with opencode install opencode-worktree (requires npm) or run npm install -g opencode opencode-worktree and rerun lattice."
+	bridgePluginManualHint  = "Install it manually with opencode install %s (requires npm)."
 )
 
 var ErrNoReadyBeads = errors.New("no ready beads available")
@@ -149,6 +150,32 @@ func (o *Orchestrator) ensureWorktreeToolInstalled() error {
 		default:
 			return fmt.Errorf("failed to install opencode-worktree automatically: %w. %s", err, pluginManualInstallHint)
 		}
+	}
+	return nil
+}
+
+func (o *Orchestrator) ensureBridgePluginInstalled() error {
+	if o == nil || o.config == nil {
+		return errors.New("orchestrator is not initialized")
+	}
+	pluginPath := filepath.Join(o.config.LatticeRoot, "plugins", bridgePluginName)
+	if _, err := os.Stat(pluginPath); err != nil {
+		return fmt.Errorf("expected lattice bridge plugin under %s: %w", pluginPath, err)
+	}
+	if !pluginAutoInstallEnabled() {
+		return nil
+	}
+	if _, err := o.runProjectCommand("opencode", "install", pluginPath); err != nil {
+		errStr := strings.ToLower(err.Error())
+		if strings.Contains(errStr, "already installed") || strings.Contains(errStr, "exists") {
+			return nil
+		}
+		return fmt.Errorf(
+			"failed to install %s plugin automatically: %w. %s",
+			bridgePluginName,
+			err,
+			fmt.Sprintf(bridgePluginManualHint, pluginPath),
+		)
 	}
 	return nil
 }

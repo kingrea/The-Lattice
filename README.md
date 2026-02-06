@@ -373,12 +373,25 @@ Edit `internal/tui/app.go`:
 
 ## OpenCode Plugin Installation
 
-Lattice needs the `opencode-worktree` plugin to manage worktrees. By default it
-will attempt to install it by running `opencode install opencode-worktree`. If
-you prefer to install the plugin yourself (for example when npm needs elevated
-privileges), set `LATTICE_PLUGIN_AUTO_INSTALL=0` in your environment and install
-the plugin manually with `opencode install opencode-worktree` (or
-`npm install -g opencode opencode-worktree`).
+Lattice needs two OpenCode plugins:
+
+- `opencode-worktree` – manages tmux worktrees.
+- `lattice-bridge` – streams session events to the HTTP bridge.
+
+By default Lattice attempts to install both by running
+`opencode install opencode-worktree` and
+`opencode install $LATTICE_ROOT/plugins/lattice-bridge` from the project
+directory. If you prefer to install plugins yourself (for example when npm needs
+elevated privileges), set `LATTICE_PLUGIN_AUTO_INSTALL=0` in your environment
+and install them manually:
+
+```bash
+opencode install opencode-worktree
+opencode install "$LATTICE_ROOT/plugins/lattice-bridge"
+```
+
+After the plugins are installed once, Lattice simply references them inside
+`opencode.jsonc`.
 
 ## Next Steps
 
