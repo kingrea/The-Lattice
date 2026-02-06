@@ -160,7 +160,10 @@ func (o *Orchestrator) ensureBridgePluginInstalled() error {
 	}
 	pluginPath := filepath.Join(o.config.LatticeRoot, "plugins", bridgePluginName)
 	if _, err := os.Stat(pluginPath); err != nil {
-		return fmt.Errorf("expected lattice bridge plugin under %s: %w", pluginPath, err)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("bridge plugin check failed: %w", err)
 	}
 	if !pluginAutoInstallEnabled() {
 		return nil

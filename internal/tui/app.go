@@ -132,6 +132,7 @@ type App struct {
 	workflow     *workflow.Workflow
 	logbook      *logbook.Logbook
 	eventBridge  *eventbridge.Server
+	eventRouter  *eventbridge.Router
 
 	workflowLoader        WorkflowDefinitionLoader
 	registryFactory       func(*config.Config) (*module.Registry, error)
@@ -208,9 +209,14 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 		lb.Info("Session opened · workflow phase: %s", wf.CurrentPhase().FriendlyName())
 	}
 	bridgeSettings := eventbridge.SettingsFromConfig(cfg)
+	router := eventbridge.NewRouter(eventbridge.RouterWithLogger(logbookLogger{logbook: lb}))
 	var bridgeServer *eventbridge.Server
 	if bridgeSettings.Enabled {
-		bridgeServer = eventbridge.NewServer(bridgeSettings, eventbridge.WithLogger(logbookLogger{logbook: lb}))
+		bridgeServer = eventbridge.NewServer(
+			bridgeSettings,
+			eventbridge.WithLogger(logbookLogger{logbook: lb}),
+			eventbridge.WithProcessor(router),
+		)
 		if err := bridgeServer.Start(context.Background()); err != nil {
 			return nil, fmt.Errorf("event bridge: %w", err)
 		}
@@ -242,6 +248,7 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 		workflow:            wf,
 		logbook:             lb,
 		eventBridge:         bridgeServer,
+		eventRouter:         router,
 		workflowLoader:      defaultWorkflowLoader,
 		registryFactory:     defaultModuleRegistryFactory,
 		mainMenu:            mainMenu,
