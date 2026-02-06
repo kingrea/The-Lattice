@@ -55,6 +55,11 @@ workflows:
 session:
   idle_watchdog:
     timeout: 5m
+# HTTP event bridge settings (used by OpenCode plugin)
+event_bridge:
+  enabled: true
+  host: 127.0.0.1
+  port: 8765
 `
 
 // CommunityRef declares one community source entry inside .lattice/config.yaml.
@@ -84,11 +89,19 @@ type ProjectConfig struct {
 	CoreAgents  map[string]CoreAgentOverride `yaml:"core_agents"`
 	Workflows   WorkflowConfig               `yaml:"workflows"`
 	Session     SessionConfig                `yaml:"session"`
+	EventBridge EventBridgeConfig            `yaml:"event_bridge"`
 }
 
 // SessionConfig governs interactive shell behavior.
 type SessionConfig struct {
 	IdleWatchdog IdleWatchdogConfig `yaml:"idle_watchdog"`
+}
+
+// EventBridgeConfig controls the embedded HTTP event bridge server.
+type EventBridgeConfig struct {
+	Enabled *bool  `yaml:"enabled,omitempty"`
+	Host    string `yaml:"host,omitempty"`
+	Port    int    `yaml:"port,omitempty"`
 }
 
 // IdleWatchdogConfig controls the inactivity timer.
@@ -315,6 +328,7 @@ func (pc *ProjectConfig) applyDefaults() {
 		pc.CoreAgents = map[string]CoreAgentOverride{}
 	}
 	pc.Session.applyDefaults()
+	pc.EventBridge.applyDefaults()
 }
 
 func (pc *ProjectConfig) normalize(base string) {
@@ -333,6 +347,7 @@ func (pc *ProjectConfig) normalize(base string) {
 		pc.Workflows.Available = append(pc.Workflows.Available, pc.Workflows.Default)
 	}
 	pc.Session.normalize()
+	pc.EventBridge.normalize()
 }
 
 func (pc *ProjectConfig) validate() error {
@@ -354,6 +369,9 @@ func (pc *ProjectConfig) validate() error {
 	}
 	if err := pc.Session.validate(); err != nil {
 		return fmt.Errorf("session: %w", err)
+	}
+	if err := pc.EventBridge.validate(); err != nil {
+		return fmt.Errorf("event_bridge: %w", err)
 	}
 	return nil
 }
@@ -382,6 +400,29 @@ func (sc SessionConfig) validate() error {
 	}
 	if _, err := time.ParseDuration(timeout); err != nil {
 		return fmt.Errorf("idle_watchdog.timeout: %w", err)
+	}
+	return nil
+}
+
+func (eb *EventBridgeConfig) applyDefaults() {
+	if eb == nil {
+		return
+	}
+}
+
+func (eb *EventBridgeConfig) normalize() {
+	if eb == nil {
+		return
+	}
+	eb.Host = strings.TrimSpace(eb.Host)
+	if eb.Port < 0 {
+		eb.Port = 0
+	}
+}
+
+func (eb EventBridgeConfig) validate() error {
+	if eb.Port < 0 || eb.Port > 65535 {
+		return fmt.Errorf("port must be between 0 and 65535")
 	}
 	return nil
 }

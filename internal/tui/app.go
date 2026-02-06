@@ -12,6 +12,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -23,6 +24,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kingrea/The-Lattice/internal/config"
+	"github.com/kingrea/The-Lattice/internal/eventbridge"
 	"github.com/kingrea/The-Lattice/internal/logbook"
 	"github.com/kingrea/The-Lattice/internal/module"
 	"github.com/kingrea/The-Lattice/internal/orchestrator"
@@ -129,6 +131,7 @@ type App struct {
 	orchestrator *orchestrator.Orchestrator
 	workflow     *workflow.Workflow
 	logbook      *logbook.Logbook
+	eventBridge  *eventbridge.Server
 
 	workflowLoader        WorkflowDefinitionLoader
 	registryFactory       func(*config.Config) (*module.Registry, error)
@@ -204,6 +207,17 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 	if err == nil {
 		lb.Info("Session opened · workflow phase: %s", wf.CurrentPhase().FriendlyName())
 	}
+	bridgeSettings := eventbridge.SettingsFromConfig(cfg)
+	var bridgeServer *eventbridge.Server
+	if bridgeSettings.Enabled {
+		bridgeServer = eventbridge.NewServer(bridgeSettings, eventbridge.WithLogger(logbookLogger{logbook: lb}))
+		if err := bridgeServer.Start(context.Background()); err != nil {
+			return nil, fmt.Errorf("event bridge: %w", err)
+		}
+		if lb != nil {
+			lb.Info("Event bridge listening at %s", bridgeServer.BaseURL())
+		}
+	}
 
 	// Build menu items based on workflow state
 	menuItems := buildMainMenu(wf)
@@ -227,6 +241,7 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 		orchestrator:        orch,
 		workflow:            wf,
 		logbook:             lb,
+		eventBridge:         bridgeServer,
 		workflowLoader:      defaultWorkflowLoader,
 		registryFactory:     defaultModuleRegistryFactory,
 		mainMenu:            mainMenu,
@@ -253,6 +268,16 @@ func NewApp(projectDir string, opts ...AppOption) (*App, error) {
 		}
 	}
 	return app, nil
+}
+
+// Close releases resources created by the TUI such as the HTTP event bridge server.
+func (a *App) Close() error {
+	if a == nil || a.eventBridge == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return a.eventBridge.Shutdown(ctx)
 }
 
 // buildMainMenu creates the main menu items based on workflow state
@@ -1179,6 +1204,17 @@ func hotkeyLabel(key string) string {
 		return fmt.Sprintf("Alt+%s", strings.ToUpper(strings.TrimPrefix(key, "M-")))
 	}
 	return strings.ToUpper(key)
+}
+
+type logbookLogger struct {
+	logbook *logbook.Logbook
+}
+
+func (l logbookLogger) Printf(format string, args ...any) {
+	if l.logbook == nil {
+		return
+	}
+	l.logbook.Info(format, args...)
 }
 
 func (a *App) workflowSelectionHeight() int {

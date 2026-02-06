@@ -194,6 +194,7 @@ func TestWorkflowSelectorIncludesBundledWorkflows(t *testing.T) {
 
 func newTestApp(t *testing.T, projectDir string, opts ...AppOption) *App {
 	t.Helper()
+	t.Setenv("LATTICE_BRIDGE_ENABLED", "false")
 	loader := func(cfg *config.Config, workflowID string) (workflow.WorkflowDefinition, error) {
 		id := strings.TrimSpace(workflowID)
 		if id == "" {

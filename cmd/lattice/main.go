@@ -60,6 +60,11 @@ func main() {
 		logErrorf("Error preparing lattice app: %v\n", err)
 		os.Exit(1)
 	}
+	defer func() {
+		if err := app.Close(); err != nil {
+			logErrorf("Error shutting down lattice app: %v\n", err)
+		}
+	}()
 
 	// Create and run the TUI
 	// tea.NewProgram creates a new bubbletea application
